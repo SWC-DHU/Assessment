@@ -34,3 +34,16 @@
 | POST | `/api/templates/{template_id}/export` | 生成 XLSX、DOCX、Markdown 或 JSON。规范 JSON 建议使用版本下载接口 |
 
 版本和文件请求均按会话限定。Provider 错误会保存在执行记录中，其中 401、模型授权拒绝、其他 403、服务不可用和输出达到长度限制分别诊断。
+
+## v2 领域接口
+
+| 路径 | 方法与行为 |
+| --- | --- |
+| `/api/semantics/catalog?version=2.0.0&term=工序` | GET。查询 RDF 类、属性与关系端点。`version=1.0.0` 查历史定义 |
+| `/api/semantics/terms?group=operations&text=堆叠作业` | GET。查询受控术语与映射依据 |
+| `/api/semantics/tools` | GET。读取需求智能体的实际工具目录 |
+| `/api/sessions/{id}/runs/{run_token}/progress` | GET。读取单进程在途运行的阶段、批次和实际状态 |
+| `/api/semantics/sessions/{id}/versions/{version}/graph` | GET。读取可导出的工艺节点、边和图诊断 |
+| `/api/semantics/sessions/{id}/versions/{version}/review` | POST。提交人工审核动作并生成可追溯的子版本 |
+
+审核动作包括 `rename_operation`、`set_component_quantity`、`confirm_capability`、`add_transition` 和 `confirm_fact`。每项都携带 `note`，并按动作接受实体标识、数值或流转条件。模型结构、基础快照和操作来源随版本保存。详情接口的 `metadata.extraction_status` 和会话消息的 `partial` 状态可以分别反映覆盖与验证情况。

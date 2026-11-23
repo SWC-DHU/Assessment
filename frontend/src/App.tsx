@@ -17,6 +17,7 @@ import type {
   OutputTemplate,
   OutputTemplatePayload,
   SampleDataset,
+  PipelineStage, ReviewRequest,
   SemanticVersion,
   TemplatePreviewResponse,
   TestSessionDetail,
@@ -40,6 +41,7 @@ export default function App() {
 
   const [stage, setStage] = useState<RunStage>("idle");
   const [isRunning, setIsRunning] = useState(false);
+  const [progress, setProgress] = useState<PipelineStage[]>([]);
   const [demoMode, setDemoMode] = useState(false);
   const [strategy, setStrategy] = useState<"semantic" | "legacy">("semantic");
   const [area, setArea] = useState("chat");
@@ -64,6 +66,29 @@ export default function App() {
 
   const abortRef = useRef<AbortController | null>(null);
   const runningToken = useRef<{ sessionId: string; token: string } | null>(null);
+
+  useEffect(() => {
+    const run = runningToken.current;
+    if (!isRunning || !run) {
+      setProgress([]);
+      return;
+    }
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const result = await api.getRunProgress(run.sessionId, run.token);
+        if (active && result.steps.length) setProgress(result.steps);
+      } catch {
+        // The run response remains authoritative if polling is temporarily unavailable.
+      } finally {
+        if (active) timer = setTimeout(() => { void poll(); }, 600);
+      }
+    };
+    void poll();
+    return () => { active = false; clearTimeout(timer); };
+  }, [isRunning]);
+
 
   const showError = useCallback((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
@@ -322,6 +347,16 @@ export default function App() {
     }
   };
 
+  const handleReview = async (version: string, payload: ReviewRequest) => {
+    const session = activeSession;
+    if (!session || isRunning) throw new Error("请等待当前解析运行结束");
+    const result = await api.reviewVersion(session.id, version, payload);
+    await loadSessionDetail(session.id);
+    setSelectedDebugMessageId(result.run_id);
+    await refreshSessionsList();
+    antdMessage.success("人工审核已保存到新版本");
+  };
+
   const handleAbortRun = () => {
     const running = runningToken.current;
     if (running) void api.cancelRun(running.sessionId, running.token).catch(showError);
@@ -553,7 +588,7 @@ export default function App() {
         </aside>
         <div className="chat-area">
           <ChatWorkbench ready={!!activeSession} key={activeSession?.id} messages={activeSession?.messages || []} files={activeSession?.files || []}
-            samples={samples} stage={stage} isRunning={isRunning} demoMode={demoMode} onToggleDemoMode={setDemoMode}
+            samples={samples} stage={stage} isRunning={isRunning} progress={progress} demoMode={demoMode} onToggleDemoMode={setDemoMode}
             onUploadFiles={handleUploadFiles} onLoadSampleText={() => {}} onLoadSampleCsv={handleLoadSampleCsv}
             onPreviewFile={setPreviewFile} onSendMessage={handleSendMessage} onAbortRun={handleAbortRun}
             onRerunMessage={handleRerunMessage} onClearSession={handleClearSession}
@@ -571,12 +606,14 @@ export default function App() {
           </label>
           <RightPanel templates={templates} activeTemplateId={activeTemplateId} onSelectTemplate={handleSelectTemplate}
             extractedJson={visibleData} templatePreview={templatePreview} onApplyJsonEdit={handleApplyJsonEdit}
-            onExport={handleExport} debugMessage={debugMessage} tab={tab} onTab={setTab} versions={versions}
+            onExport={handleExport} debugMessage={debugMessage} progress={progress} isRunning={isRunning} tab={tab} onTab={setTab} versions={versions}
             onVersion={(id) => void handleInspect(id)} onRevise={(id) => {
               setRevisionBase(id); setStrategy("semantic"); setArea("chat");
               requestAnimationFrame(() => document.getElementById("workbench-input")?.focus());
             }} onVerify={(id) => activeSession ? api.verifyVersion(activeSession.id, id) : Promise.reject("没有会话")
-            } onProject={handleProject} onOpenSource={(id) => {
+            } onProject={handleProject} onReview={handleReview}
+            onGraph={(id) => activeSession ? api.getProcessGraph(activeSession.id, id) : Promise.reject(new Error("没有会话"))}
+            onOpenSource={(id) => {
               const file = activeSession?.files.find((item) => item.id === id);
               if (file) setPreviewFile(file);
               else antdMessage.info("来源文件已从当前会话移除");

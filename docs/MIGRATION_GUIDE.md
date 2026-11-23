@@ -27,3 +27,7 @@ round_trip = SemanticModel.model_validate(model_json)
 5. 对 Metatwin 的设备或资源库做显式匹配。解析中的能力和设备描述属于需求数据，后续设备选型有独立的来源和授权。
 
 建议先用同一工作簿和合成用例对齐确定性投影与摘要，再接通新的 Provider 和持久层。
+
+## v2 迁移接口
+
+外部服务可从领域包直接导入 `RequirementSemanticModel` 和 `query_ontology`。将 `process_graph` 作为工艺拓扑交付数据，并保留语义关系和来源索引供后续资源匹配查询。消费方可据 `metadata.extraction_status` 暂缓自动建模，针对缺失的流转条件向用户发起澄清。采用 v1 时仍可用 `query_ontology(version="1.0.0")` 读取该版本的契约。

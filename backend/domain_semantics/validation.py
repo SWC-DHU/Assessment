@@ -4,20 +4,12 @@ from graphlib import CycleError, TopologicalSorter
 import math
 import re
 
-from .catalog import load_vocabulary
+from .catalog import load_vocabulary, relation_signatures
 from .schema import Constraint, Issue, SemanticModel, Validation
 
-TERMINALS = {
-    "hasComponent": ({"Product"}, {"Product", "Material"}),
-    "hasPredecessor": ({"Operation"}, {"Operation"}),
-    "consumes": ({"Operation"}, {"Material"}),
-    "produces": ({"Operation"}, {"Material"}),
-    "requiresCapability": ({"Operation"}, {"Capability"}),
-    "appliesTo": ({"Constraint"}, {"Product", "Operation", "Capability", "ProductionLine"}),
-    **{kind: ({"Operation"}, {"Operation"}) for kind in
-       ("branchesTo", "mergesInto", "reworksTo", "conditionallyPrecedes")},
-}
-COLLECTIONS = ("products", "operations", "materials", "capabilities", "constraints")
+from .process_graph import FLOW
+
+COLLECTIONS = ("products", "operations", "materials", "material_states", "capabilities", "constraints")
 UNIT = r"秒钟|秒|分钟|小时|毫秒|ms|min|MPa|kPa|Pa|bar|mm|μm|um|°C|℃|[shmK]"
 NUMBER = r"[-−+]?\d+(?:\.\d+)?"
 OPERATORS = r"<=|>=|≤|≥|<|>|＝|=|不超过|不得超过|至多|不少于|至少|不低于|小于|大于|修改为|改为|改成|调整为|为|是"
@@ -88,7 +80,7 @@ def quantity_supported(constraint: Constraint) -> bool:
     return constraint.lower is None and constraint.upper is None and expected in actual
 
 
-def validate_model(model: SemanticModel, extra: list[Issue] | None = None) -> SemanticModel:
+def validate_model(model: SemanticModel, extra: list[Issue] | None = None, tool=None) -> SemanticModel:
     issues = list(extra or [])
     entities = [entity for group in COLLECTIONS for entity in getattr(model, group)]
     by_id = {entity.id: entity for entity in entities}
@@ -100,7 +92,7 @@ def validate_model(model: SemanticModel, extra: list[Issue] | None = None) -> Se
     for key, count in Counter(fact.id for fact in [*entities, *model.relations]).items():
         if count > 1:
             issue("duplicate_id", "事实 ID 重复", key)
-    for fact in [*entities, *model.relations]:
+    for fact in [*entities, *model.relations, *model.modeling_intents]:
         evidence = fact.evidence
         if evidence and any(entry.document_id not in source_ids for entry in evidence):
             fact.status = "invalid"
@@ -111,15 +103,27 @@ def validate_model(model: SemanticModel, extra: list[Issue] | None = None) -> Se
         else:
             fact.status = "verified"
 
-    dependencies: dict[str, set[str]] = defaultdict(set)
+    for state in model.material_states:
+        if state.material_id not in by_id or by_id[state.material_id].concept != "Material":
+            state.status = "invalid"
+            issue("state_material_reference", "物料状态必须指向基础物料", state.id)
+
+    terminals = relation_signatures(model.ontology_version)
+    dependency_graphs = {"precedence": defaultdict(set), "dependency": defaultdict(set)}
     for relation in model.relations:
         source, target = by_id.get(relation.source_id), by_id.get(relation.target_id)
-        a, b = TERMINALS[relation.type]
+        a, b = terminals.get(relation.type, (set(), set()))
         target_type = target.concept if target else "ProductionLine" if relation.target_id == "line" else None
         if (not source or source.concept not in a or target_type not in b
                 or relation.source_id == relation.target_id):
             relation.status = "invalid"
             issue("relation_reference", f"{relation.type} 的关系端点缺失或类型不符", relation.id)
+        elif relation.quantity is not None and relation.type != "hasComponent":
+            relation.status = "invalid"
+            issue("unexpected_quantity", "组成数量仅用于 hasComponent", relation.id)
+        elif relation.asserted_as == "inferred":
+            relation.status = "pending"
+            issue("inferred_relation", "模型候选推断需要人工确认", relation.id, "pending")
         elif relation.type == "conditionallyPrecedes" and not relation.condition:
             relation.status = "invalid"
             issue("condition_required", "条件依赖需要明确条件", relation.id)
@@ -130,23 +134,82 @@ def validate_model(model: SemanticModel, extra: list[Issue] | None = None) -> Se
         elif relation.max_iterations is not None and relation.type != "reworksTo":
             relation.status = "invalid"
             issue("unexpected_rework_limit", "返工次数仅适用于返工关系", relation.id)
-        elif relation.status == "verified" and relation.type == "hasPredecessor":
-            dependencies[relation.source_id].add(relation.target_id)
-        elif relation.status == "verified" and relation.type in {"branchesTo", "mergesInto", "conditionallyPrecedes"}:
-            dependencies[relation.target_id].add(relation.source_id)
-    try:
-        tuple(TopologicalSorter(dependencies).static_order())
-    except CycleError as exc:
-        cycle = set(exc.args[1])
-        for relation in model.relations:
-            if (relation.type in {"hasPredecessor", "branchesTo", "mergesInto", "conditionallyPrecedes"}
-                    and {relation.source_id, relation.target_id} <= cycle):
-                relation.status = "invalid"
-        issue("precedence_cycle", "直接工艺依赖形成环路", "relations")
+        elif relation.status == "verified" and relation.type in FLOW and relation.type != "reworksTo":
+            reverse, _, _ = FLOW[relation.type]
+            later, earlier = ((relation.source_id, relation.target_id) if reverse
+                              else (relation.target_id, relation.source_id))
+            group = "dependency" if relation.type == "dependsOn" else "precedence"
+            dependency_graphs[group][later].add(earlier)
 
+    def reachable(dependencies, start, target):
+        visited, pending = set(), [start]
+        while pending:
+            node = pending.pop()
+            if node == target:
+                return True
+            if node not in visited:
+                visited.add(node)
+                pending.extend(dependencies[node] - visited)
+        return False
+
+    for group, dependencies in dependency_graphs.items():
+        try:
+            tuple(TopologicalSorter(dependencies).static_order())
+        except CycleError:
+            for relation in model.relations:
+                if relation.status != "verified" or relation.type not in FLOW or relation.type == "reworksTo":
+                    continue
+                if (relation.type == "dependsOn") != (group == "dependency"):
+                    continue
+                reverse, _, _ = FLOW[relation.type]
+                later, earlier = ((relation.source_id, relation.target_id) if reverse
+                                  else (relation.target_id, relation.source_id))
+                if reachable(dependencies, earlier, later):
+                    relation.status = "invalid"
+                    issue(f"{group}_cycle", "工艺依赖形成非返工环路", relation.id)
+
+    component_groups = defaultdict(list)
+    for relation in model.relations:
+        if relation.type == "hasComponent" and relation.quantity and relation.status == "verified":
+            quantity = relation.quantity
+            if canonical_unit(quantity.unit) in {"ms", "s", "min", "h", "Pa", "MPa", "K", "°C"}:
+                relation.status = "invalid"
+                issue("component_unit_mismatch", "物料组成数量使用了不相容量纲", relation.id)
+            else:
+                component_groups[relation.source_id, relation.target_id, quantity.unit, quantity.basis].append(relation)
+    for records in component_groups.values():
+        if len({record.quantity.value for record in records}) > 1:
+            for relation in records:
+                relation.status = "conflict"
+                issue("component_quantity_conflict", "同一组件及计量基准出现不同数量", relation.id, "conflict")
+
+    if tool is None:
+        validate_constraints(model.constraints, by_id, issue)
+    else:
+        tool("validate_constraints", f"{len(model.constraints)} 条工艺约束", validate_constraints,
+             model.constraints, by_id, issue)
+
+    vocabulary = load_vocabulary()["capabilities"]
+    for capability in model.capabilities:
+        if capability.code is None:
+            if capability.status == "verified":
+                capability.status = "pending"
+            issue("capability_unmapped", f"待确认能力术语：{capability.name}", capability.id, "pending")
+        elif capability.code not in vocabulary:
+            capability.status = "invalid"
+            issue("capability_unknown", "能力编码不在词表内", capability.id)
+
+    model.unresolved_items = issues
+    states = {item.status for item in issues}
+    status = next((state for state in ("invalid", "conflict", "pending", "unprocessed") if state in states), "verified")
+    model.validation = Validation(status=status, issues=issues)
+    return model
+
+
+def validate_constraints(constraints: list[Constraint], by_id: dict, issue) -> None:
     grouped = defaultdict(list)
     parameters = load_vocabulary()["parameters"]
-    for value in model.constraints:
+    for value in constraints:
         if value.target_id != "line" and (value.target_id not in by_id or
                 by_id[value.target_id].concept not in {"Operation", "Product", "Capability"}):
             value.status = "invalid"
@@ -191,19 +254,3 @@ def validate_model(model: SemanticModel, extra: list[Issue] | None = None) -> Se
                 for record, _, _ in entries:
                     record.status = "conflict"
                     issue("constraint_conflict", "同一对象和参数的约束区间不相容", record.id, "conflict")
-
-    vocabulary = load_vocabulary()["capabilities"]
-    for capability in model.capabilities:
-        if capability.code is None:
-            if capability.status == "verified":
-                capability.status = "pending"
-            issue("capability_unmapped", f"待确认能力术语：{capability.name}", capability.id, "pending")
-        elif capability.code not in vocabulary:
-            capability.status = "invalid"
-            issue("capability_unknown", "能力编码不在词表内", capability.id)
-
-    model.unresolved_items = issues
-    states = {item.status for item in issues}
-    status = next((state for state in ("invalid", "conflict", "pending", "unprocessed") if state in states), "verified")
-    model.validation = Validation(status=status, issues=issues)
-    return model

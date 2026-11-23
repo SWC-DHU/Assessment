@@ -1,0 +1,104 @@
+{
+  "created_at": "2026-11-23T07:19:33.599741+00:00",
+  "input": "合成单工序与整线节拍",
+  "input_digest": "e86670b27683f749905350d3d40cb78825204dbc70f17770f98b821ae7c3616e",
+  "gold_digest": "cfadaa89c4e63cc832146c2bb602f4faf8dc59c954421a481f8061024d6a8f3a",
+  "configuration": {
+    "provider": "https://api.3stooges.chat/v1",
+    "model": "deepseek-v4.1-flash",
+    "temperature": 0.0,
+    "max_tokens": 4096,
+    "timeout_s": 35,
+    "request_budget": 2,
+    "json_mode": true,
+    "offline": false,
+    "prompt_version": "2.0.0",
+    "evaluation_version": "2.0.0",
+    "schema_version": "2.0.0",
+    "ontology_version": "2.0.0",
+    "vocabulary_version": "2.0.0"
+  },
+  "runs": [
+    {
+      "method": "C",
+      "implementation": "C-2.0",
+      "trial": 1,
+      "status": "success",
+      "coverage_status": "complete",
+      "finish_reason": "stop",
+      "elapsed_ms": 6210.77,
+      "calls": 1,
+      "usage": {
+        "prompt_tokens": 1648,
+        "completion_tokens": 412,
+        "total_tokens": 2060
+      },
+      "response_model": "deepseek-v4.1-flash",
+      "error_code": null,
+      "prompt_digest": "c57dc2fb55174d13ffb0f314250210d5f1f3a25d3971cf00beceff5f342540c3",
+      "output_digest": "d72d37e8a9fe332af84a245e42bf3b1e9f49c4dde83f220a415a8522fe56f2bf",
+      "metrics": {
+        "operation_entity": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "true_positive": 1,
+          "expected": 1,
+          "observed": 1
+        },
+        "material_entity": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "product_entity": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "component_quantities": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "canonical_material_count": 0,
+        "material_state_count": 0,
+        "process_relations": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "numeric_constraints": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "true_positive": 1,
+          "expected": 1,
+          "observed": 1
+        },
+        "mapping_accuracy": null,
+        "mapping_coverage": null,
+        "evidence_accuracy": 1.0,
+        "unsupported_fact_fraction": 0.0,
+        "schema_valid": true,
+        "topology_completeness": null,
+        "output_complete": true
+      }
+    }
+  ],
+  "mean_elapsed_ms": {
+    "C": 6210.77
+  }
+}

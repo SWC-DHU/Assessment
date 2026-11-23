@@ -9,7 +9,7 @@
 | 校验 | `validation.py` | 引用类型、直接依赖环、条件与返工限制、数值及单位、来源冲突 |
 | 投影 | `projection.py` | 语义字段与旧模板字段的只读输出上下文 |
 
-Schema、本体、词表和 Prompt 当前均为 `1.0.0`。本体命名空间为 `https://assessment.example.org/ontology/manufacturing#`。业务检查由 Python 执行。本体保留 OWL 的关系语义供迁移或图查询使用。
+Schema、本体、词表和 Prompt 当前均为 `2.0.0`。本体命名空间为 `https://assessment.example.org/ontology/manufacturing#`。业务检查由 Python 执行。本体保留 OWL 的关系语义供迁移或图查询使用。
 
 ## 关系与方向
 
@@ -27,3 +27,5 @@ Schema、本体、词表和 Prompt 当前均为 `1.0.0`。本体命名空间为 
 工时、等待、缓存和节拍独立编码。示例 `整线生产节拍≤120秒/模组` 表达为 `target_id="line"`、`parameter_code="takt_time"`、`comparator="<="`、`value=120`、`unit="s"`、`basis="模组"`。约束数值仅在受支持的范围和量纲内核验，显式空值和零值分开保存。
 
 状态包括已核验、待确认、来源冲突、校验不通过及未处理。逐字匹配验证引用的存在。语义检查进一步核对对象、比较方向和关系端点。自然语言识别采用保守规则，定向工时修订、明确表格列和所支持的运算符拥有较强的确定性。跨段推理、OCR 和更复杂的工程单位留作后续扩展。
+
+新版图、批次、关系边界及人工状态见 [REFACTOR_V2.md](REFACTOR_V2.md)。

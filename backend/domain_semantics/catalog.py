@@ -3,18 +3,25 @@ from pathlib import Path
 import re
 import unicodedata
 
-from rdflib import Graph, Namespace, OWL, RDF, URIRef
+from rdflib import Graph, Namespace, OWL, RDF, RDFS, URIRef
+from rdflib.collection import Collection
 import yaml
 
 ROOT = Path(__file__).resolve().parent
 MANUFACTURING_IRI = URIRef("https://assessment.example.org/ontology/manufacturing")
 M = Namespace(f"{MANUFACTURING_IRI}#")
+ONTOLOGY_VERSION = "2.0.0"
 
 
 @lru_cache
-def load_ontology() -> Graph:
+def load_ontology(version: str = ONTOLOGY_VERSION) -> Graph:
+    base = ROOT / "ontology"
+    if version != ONTOLOGY_VERSION:
+        if version != "1.0.0":
+            raise KeyError(version)
+        base = base / "versions" / version
     graph = Graph()
-    for path in sorted((ROOT / "ontology").glob("*.ttl")):
+    for path in sorted(base.glob("*.ttl")):
         graph.parse(path, format="turtle")
     return graph
 
@@ -24,16 +31,94 @@ def load_vocabulary() -> dict:
     return yaml.safe_load((ROOT / "vocabulary/manufacturing.yaml").read_text(encoding="utf-8"))
 
 
-def ontology_metadata() -> dict:
-    graph = load_ontology()
+def term_id(node) -> str:
+    return str(node).removeprefix(str(M))
+
+
+def endpoints(graph: Graph, node, predicate) -> list[str]:
+    result = []
+    for value in graph.objects(node, predicate):
+        member_list = graph.value(value, OWL.unionOf)
+        if member_list:
+            result.extend(term_id(member) for member in Collection(graph, member_list))
+        else:
+            result.append(term_id(value))
+    return sorted(result)
+
+
+@lru_cache
+def relation_signatures(version: str = ONTOLOGY_VERSION) -> dict[str, tuple[set[str], set[str]]]:
+    graph = load_ontology(version)
+    return {
+        term_id(node): (set(endpoints(graph, node, RDFS.domain)), set(endpoints(graph, node, RDFS.range)))
+        for node in graph.subjects(RDF.type, OWL.ObjectProperty)
+    }
+
+
+def term_details(graph: Graph, node) -> dict:
+    return {
+        "id": term_id(node), "iri": str(node),
+        "label": str(graph.value(node, RDFS.label) or term_id(node)),
+        "definition": str(graph.value(node, RDFS.comment) or ""),
+        "subclass_of": sorted(term_id(parent) for parent in graph.objects(node, RDFS.subClassOf)),
+        "domain": endpoints(graph, node, RDFS.domain),
+        "range": endpoints(graph, node, RDFS.range),
+    }
+
+
+def ontology_metadata(version: str = ONTOLOGY_VERSION) -> dict:
+    graph = load_ontology(version)
+    classes = sorted((node for node in graph.subjects(RDF.type, OWL.Class) if node in M), key=str)
+    relations = sorted(graph.subjects(RDF.type, OWL.ObjectProperty), key=str)
+    attributes = sorted(graph.subjects(RDF.type, OWL.DatatypeProperty), key=str)
+    vocabulary = load_vocabulary() if version == ONTOLOGY_VERSION else yaml.safe_load(
+        (ROOT / "ontology/versions" / version / "vocabulary.yaml").read_text(encoding="utf-8"))
     return {
         "namespace": str(M),
         "ontology_version": str(graph.value(MANUFACTURING_IRI, OWL.versionInfo)),
         "version_iri": str(graph.value(MANUFACTURING_IRI, OWL.versionIRI)),
-        "concepts": sorted(str(node).split("#")[-1] for node in graph.subjects(RDF.type, OWL.Class) if node in M),
-        "relations": sorted(str(node).split("#")[-1] for node in graph.subjects(RDF.type, OWL.ObjectProperty)),
-        "vocabulary": load_vocabulary(),
+        "available_versions": ["1.0.0", ONTOLOGY_VERSION],
+        "concepts": [term_id(node) for node in classes],
+        "relations": [term_id(node) for node in relations],
+        "classes": [term_details(graph, node) for node in classes],
+        "object_properties": [term_details(graph, node) for node in relations],
+        "data_properties": [term_details(graph, node) for node in attributes],
+        "vocabulary": vocabulary,
     }
+
+
+def check_ontology() -> None:
+    from typing import get_args
+    from .schema import RelationKind
+
+    metadata = ontology_metadata()
+    classes = set(metadata["concepts"])
+    signatures = relation_signatures()
+    if (metadata["ontology_version"] != ONTOLOGY_VERSION or set(signatures) != set(get_args(RelationKind))
+            or any(not domain or not range_ or not (domain | range_) <= classes for domain, range_ in signatures.values())):
+        raise RuntimeError("OWL 关系与语义 Schema 的端点契约不一致")
+
+
+def query_ontology(term: str | None = None, version: str = ONTOLOGY_VERSION) -> dict:
+    metadata = ontology_metadata(version)
+    if not term:
+        return metadata
+    needle = normalize(term)
+    concepts = metadata["vocabulary"]["concepts"]
+    matches = [
+        row for group in ("classes", "object_properties", "data_properties")
+        for row in metadata[group]
+        if needle in {normalize(word) for word in (row["id"], row["iri"], row["label"], *concepts.get(row["id"], []))}
+    ]
+    return {key: metadata[key] for key in ("ontology_version", "namespace")} | {"matches": matches}
+
+
+def normalize_term(group: str, text: str) -> dict:
+    if group not in {"concepts", "operations", "capabilities", "parameters"}:
+        raise ValueError("未知词表分类")
+    matches = candidates(group, text)
+    return {"original": text, "group": group, "candidates": matches,
+            "term": matches[0] if len(matches) == 1 else None, "basis": "词表编码或别名" if len(matches) == 1 else None}
 
 
 def normalize(text: str) -> str:

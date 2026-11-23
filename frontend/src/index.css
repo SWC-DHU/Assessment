@@ -389,3 +389,42 @@ button:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus
   .result-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 4px; }
   .result-tabs button { justify-content: center; font-size: 11px; }
 }
+
+.requirement-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 11px;
+}
+.requirement-progress span, .chat-partial {
+  display: inline-flex;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: var(--subtle);
+  background: var(--sidebar);
+}
+.requirement-progress [data-state="running"] { color: var(--accent); background: var(--accent-faint); }
+.requirement-progress [data-state="error"] { color: var(--error); background: #faeeec; }
+.requirement-progress [data-state="partial"], .chat-partial { color: var(--warning); background: #f7efdf; margin-inline-start: 4px; }
+.ontology-list { display: grid; max-height: 50vh; overflow: auto; }
+.ontology-list article, .batch-list article { padding: 10px 4px; border-bottom: 1px solid var(--line); }
+.ontology-list p { margin: 4px 0; color: var(--subtle); }
+.ontology-list small { display: block; }
+.ontology-list code { color: var(--accent); }
+.batch-list article { display: flex; justify-content: space-between; gap: 8px; align-items: start; }
+.batch-list small { color: var(--subtle); }
+.intent-list h4 { font-size: 13px; margin: 0; }
+.intent-list ul { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 12px; margin: 6px 0 0; padding-left: 16px; }
+.review-quantity { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.review-quantity .ant-input-number { width: 100%; }
+.graph-legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--subtle); font-size: 11px; margin: 0 0 8px; }
+.graph-legend span::before { content: ""; display: inline-block; width: 16px; border-top: 1px solid var(--accent); margin-right: 4px; vertical-align: middle; }
+.graph-legend span:nth-child(2)::before { border-top-style: dashed; }
+.graph-node[data-concept="MaterialState"] { background: #e3efed; }
+.review-pill[data-state="confirmed"], .review-pill[data-state="complete"], .review-pill[data-state="located"] {
+  background: var(--accent-faint); color: #335641;
+}

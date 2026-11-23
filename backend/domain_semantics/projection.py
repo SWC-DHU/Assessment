@@ -3,10 +3,23 @@ from .schema import SemanticModel
 from .validation import COLLECTIONS
 
 
+def material_labels(relation, fallback: str) -> list[str]:
+    """A cell token is the supplied material label even if it maps to a base material."""
+    structured = [
+        cite.quote for cite in relation.evidence if cite.status == "verified" and cite.method == "structured"
+        and cite.location.cell is not None
+    ]
+    return list(dict.fromkeys(structured)) or [fallback]
+
+
 def template_context(model: SemanticModel) -> dict:
     semantic = model.model_dump(mode="json")
     lookup = {row.id: row for group in COLLECTIONS for row in getattr(model, group)}
     durations = {"ms": 0.001, "s": 1, "min": 60, "h": 3600}
+    material_flows: dict[tuple[str, str], list[str]] = {}
+    for edge in model.relations:
+        if edge.type in {"consumes", "produces"} and edge.status == "verified" and edge.target_id in lookup:
+            material_flows.setdefault((edge.source_id, edge.type), []).extend(material_labels(edge, lookup[edge.target_id].name))
     operations = []
     for op, raw in zip(model.operations, semantic["operations"]):
         issues = {issue.code for issue in model.validation.issues if issue.path == op.id}
@@ -18,8 +31,8 @@ def template_context(model: SemanticModel) -> dict:
                      and item.comparator == "=" and item.value is not None and item.status == "verified"]
             return valid[0] if valid and len(set(valid)) == 1 else None
         work, takt = times("process_time"), times("takt_time")
-        input_names = [lookup[key].name for key in op.input_material_ids]
-        output_names = [lookup[key].name for key in op.output_material_ids]
+        input_names = list(dict.fromkeys(material_flows.get((op.id, "consumes"), [lookup[key].name for key in op.input_material_ids])))
+        output_names = list(dict.fromkeys(material_flows.get((op.id, "produces"), [lookup[key].name for key in op.output_material_ids])))
         predecessor_labels = [lookup[key].number or lookup[key].name for key in op.predecessor_ids]
         cell_states = {}
         unavailable = any(item.status == "unprocessed" for item in model.validation.issues)

@@ -46,4 +46,4 @@ include = ["app*", "domain_semantics*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-domain_semantics = ["ontology/*.ttl", "vocabulary/*.yaml", "prompts/*.txt"]
+domain_semantics = ["ontology/*.ttl", "ontology/versions/*/*.ttl", "ontology/versions/*/*.yaml", "vocabulary/*.yaml", "prompts/*.txt"]

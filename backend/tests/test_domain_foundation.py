@@ -8,7 +8,7 @@ from domain_semantics.schema import Constraint, Operation
 
 def test_versioned_catalog_and_public_schema():
     metadata = ontology_metadata()
-    assert metadata["ontology_version"] == "1.0.0"
+    assert metadata["ontology_version"] == "2.0.0"
     assert {"Product", "Material", "ProcessRelation"} <= set(metadata["concepts"])
     assert "reworksTo" in metadata["relations"]
     assert candidates("capabilities", " 精确定位 ") == ["POSITION"]

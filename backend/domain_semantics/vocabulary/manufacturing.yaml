@@ -1,4 +1,4 @@
-version: 1.0.0
+version: 2.0.0
 concepts:
   Product: [产品, 组件]
   Operation: [工序, 工艺步骤, 生产工序]
@@ -6,6 +6,13 @@ concepts:
   Capability: [制造能力, 资源能力]
   Constraint: [限制, 工艺约束]
   ProcessRelation: [工艺关系, 工序关系]
+operations:
+  清洗: [清洗工序, 清洗作业, cleaning operation]
+  激光清洗: [激光清洗工序, laser cleaning operation]
+  堆叠: [堆叠作业, 堆叠工序, stacking operation]
+  装配: [装配工序, 装配作业, assembly operation]
+  检测: [检测工序, 检验作业, inspection operation]
+  包装: [包装工序, 包装作业, packaging operation]
 capabilities:
   FEED: [供料, 上料, 电芯供料, feeding]
   GRIP: [抓取, gripping]
@@ -34,7 +41,7 @@ parameters:
     aliases: [缓存时间, 缓冲时间, buffer time]
     units: [ms, s, min, h]
   takt_time:
-    aliases: [生产节拍, 整线节拍, 节拍, takt time]
+    aliases: [生产节拍, 整线节拍, 设计下线节拍, 下线节拍, 节拍, takt time]
     units: [ms, s, min, h]
   pressure:
     aliases: [压力, 测试压力, pressure]

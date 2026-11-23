@@ -31,7 +31,7 @@ class ExtractionSchemaConfig(BaseModel):
 
 class AgentExecutionConfig(BaseModel):
     timeout_seconds: int | None = Field(default=None, ge=1, le=600)
-    request_budget: int | None = Field(default=None, ge=1, le=4)
+    request_budget: int | None = Field(default=None, ge=1, le=32)
     llm_disambiguation: bool = True
 
 
@@ -282,7 +282,7 @@ class TestSessionDetail(TestSessionSummary):
 
 
 class RunChatRequest(BaseModel):
-    message: str = ""
+    message: str = Field(default="", max_length=200_000)
     file_ids: list[str] = Field(default_factory=list)
     agent_id: str | None = None
     template_id: str | None = None

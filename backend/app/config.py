@@ -19,7 +19,10 @@ class Settings(BaseSettings):
     default_llm_api_key: str = ""
     default_llm_model: str = "gpt-4o-mini"
     llm_timeout_seconds: int = Field(default=90, ge=1, le=600)
-    llm_request_budget: int = Field(default=2, ge=1, le=4)
+    llm_request_budget: int = Field(default=2, ge=1, le=32)
+
+    max_upload_bytes: int = Field(default=25 * 1024 * 1024, ge=1024)
+    max_upload_total_bytes: int = Field(default=60 * 1024 * 1024, ge=1024)
 
     backend_host: str = "127.0.0.1"
     backend_port: int = 7878

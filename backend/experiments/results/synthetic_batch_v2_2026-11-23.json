@@ -1,0 +1,104 @@
+{
+  "created_at": "2026-11-23T07:17:43.009077+00:00",
+  "input": "合成三步装配场景",
+  "input_digest": "3766fcd9fac35adc4d66971b6baf9af6910aa254e56b2bf01cbe878b0ec8ffc4",
+  "gold_digest": "1f2275886a9394527ea68ae63473d5503763615ee09558a0a6c94df936519882",
+  "configuration": {
+    "provider": "https://api.3stooges.chat/v1",
+    "model": "deepseek-v4.1-flash",
+    "temperature": 0.0,
+    "max_tokens": 2400,
+    "timeout_s": 38,
+    "request_budget": 4,
+    "json_mode": true,
+    "offline": false,
+    "prompt_version": "2.0.0",
+    "evaluation_version": "2.0.0",
+    "schema_version": "2.0.0",
+    "ontology_version": "2.0.0",
+    "vocabulary_version": "2.0.0"
+  },
+  "runs": [
+    {
+      "method": "C",
+      "implementation": "C-2.0",
+      "trial": 1,
+      "status": "partial",
+      "coverage_status": "partial",
+      "finish_reason": "length",
+      "elapsed_ms": 86151.07,
+      "calls": 3,
+      "usage": {
+        "prompt_tokens": 5213,
+        "completion_tokens": 7200,
+        "total_tokens": 12413
+      },
+      "response_model": "deepseek-v4.1-flash",
+      "error_code": "output_truncated",
+      "prompt_digest": "c57dc2fb55174d13ffb0f314250210d5f1f3a25d3971cf00beceff5f342540c3",
+      "output_digest": "8bfd8439fac55130fcc61638b72d3a4f1a93f9ce776675748050b3fc1c358cbf",
+      "metrics": {
+        "operation_entity": {
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "true_positive": 0,
+          "expected": 3,
+          "observed": 0
+        },
+        "material_entity": {
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "true_positive": 0,
+          "expected": 5,
+          "observed": 0
+        },
+        "product_entity": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "component_quantities": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "canonical_material_count": 0,
+        "material_state_count": 0,
+        "process_relations": {
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "true_positive": 0,
+          "expected": 9,
+          "observed": 0
+        },
+        "numeric_constraints": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "true_positive": 1,
+          "expected": 1,
+          "observed": 1
+        },
+        "mapping_accuracy": null,
+        "mapping_coverage": 0.0,
+        "evidence_accuracy": 1.0,
+        "unsupported_fact_fraction": 0.0,
+        "schema_valid": true,
+        "topology_completeness": 0.0,
+        "output_complete": false
+      }
+    }
+  ],
+  "mean_elapsed_ms": {
+    "C": 86151.07
+  }
+}

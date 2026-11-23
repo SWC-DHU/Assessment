@@ -4,7 +4,7 @@ from app.services.parser import parse_file_bytes
 
 
 def test_natural_language_verifies_direction_value_and_units_without_trusting_candidates():
-    text = "电芯清洗先于电芯堆叠。电芯堆叠需要精确定位。整线生产节拍≤120秒/模组。"
+    text = "电芯堆叠的直接前驱是电芯清洗。电芯堆叠需要精确定位。整线生产节拍≤120秒/模组。"
     doc = message_document("user-a", text)
     quote = lambda value: [{"quote": value, "document_id": "user-a", "fragment_id": "message"}]
     payload = {
@@ -21,9 +21,9 @@ def test_natural_language_verifies_direction_value_and_units_without_trusting_ca
         ],
         "relations": [
             {"type": "hasPredecessor", "source_id": "stack", "target_id": "clean",
-             "evidence": quote("电芯清洗先于电芯堆叠")},
+             "evidence": quote("电芯堆叠的直接前驱是电芯清洗")},
             {"type": "hasPredecessor", "source_id": "clean", "target_id": "stack",
-             "evidence": quote("电芯清洗先于电芯堆叠")},
+             "evidence": quote("电芯堆叠的直接前驱是电芯清洗")},
             {"type": "requiresCapability", "source_id": "stack", "target_id": "position",
              "evidence": quote("电芯堆叠需要精确定位")},
         ],

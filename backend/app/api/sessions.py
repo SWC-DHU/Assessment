@@ -1,4 +1,5 @@
 import asyncio
+from collections import deque
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from time import monotonic
@@ -162,10 +163,17 @@ async def upload_files(
     session_dir = settings.upload_path / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
 
-    saved_records: list[UploadedFile] = []
+    documents = []
+    total = 0
     for upload in files:
-        safe_name = Path(upload.filename or "untitled.txt").name
-        raw = await upload.read()
+        raw = await upload.read(settings.max_upload_bytes + 1)
+        total += len(raw)
+        if len(raw) > settings.max_upload_bytes or total > settings.max_upload_total_bytes:
+            raise HTTPException(status_code=413, detail="上传文件超过单文件或单批大小上限")
+        documents.append((Path(upload.filename or "untitled.txt").name, raw))
+
+    saved_records: list[UploadedFile] = []
+    for safe_name, raw in documents:
         unique_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
         dest = session_dir / unique_name
         await run_in_threadpool(dest.write_bytes, raw)
@@ -270,6 +278,7 @@ def delete_uploaded_file(session_id: str, file_id: str, db: Session = Depends(ge
 
 active_runs: dict[tuple[str, uuid.UUID], asyncio.Event] = {}
 early_cancellations: dict[tuple[str, uuid.UUID], float] = {}
+run_progress: dict[tuple[str, uuid.UUID], deque] = {}
 
 
 def expire_cancellations() -> None:
@@ -292,10 +301,19 @@ def track_run(session_id: str, token: uuid.UUID | None):
     if early_cancellations.pop(key, None) is not None:
         flag.set()
     active_runs[key] = flag
+    run_progress[key] = deque(maxlen=100)
     try:
         yield flag
     finally:
         active_runs.pop(key, None)
+        run_progress.pop(key, None)
+
+
+@router.get("/{session_id}/runs/{token}/progress")
+async def get_run_progress(session_id: str, token: uuid.UUID, db: Session = Depends(get_db)):
+    _get_session_or_404(db, session_id)
+    progress = run_progress.get((session_id, token))
+    return {"status": "running" if progress is not None else "waiting", "steps": list(progress or [])}
 
 
 @router.post("/{session_id}/runs/{token}/cancel", status_code=status.HTTP_202_ACCEPTED)
@@ -337,6 +355,7 @@ async def _execute_extraction_turn(
     db: Session, session: TestSession, message_text: str, file_ids: list[str], agent: AgentProfile,
     template: OutputTemplate | None, current_state: dict | None, request: Request, cancelled: asyncio.Event,
     use_demo_fallback: bool = False, strategy: str = "semantic",
+    run_token: uuid.UUID | None = None,
     history_limit: int | None = None,
 ) -> RunChatResponse:
     if cancelled.is_set():
@@ -403,12 +422,19 @@ async def _execute_extraction_turn(
     else:
         documents = await run_in_threadpool(lambda: [uploaded_document(f) for f in good_files])
         db.rollback()
+        progress = run_progress.get((session_id, run_token))
         model, result = await _while_connected(execute(
             config, message_document(user_id, message_text), documents, run_id, base,
             offline=use_demo_fallback or config.base_url.startswith("mock://"), failed=errors,
+            session_id=session_id, publish=(lambda step: progress.append(redact(step, config.api_key)))
+            if progress is not None else None,
         ), request, cancelled)
         if model:
+            exported = timestamp()
             result.extracted_json = template_context(model)
+            phase = trace("export_requirement_model", *exported, "success", "已生成规范模型及模板投影")
+            result.debug_info["pipeline_stages"].append(phase)
+            result.debug_info["tool_trace"].append(phase)
     if cancelled.is_set() or await request.is_disconnected():
         raise HTTPException(status_code=499, detail="运行已停止")
 
@@ -427,7 +453,7 @@ async def _execute_extraction_turn(
     patch = dict(title=title, agent_id=agent_id)
     if template_config:
         patch["template_id"] = template_config["template_id"]
-    if result.status == "success" and result.extracted_json is not None:
+    if result.status in {"success", "partial"} and result.extracted_json is not None:
         patch["current_extracted_json"] = result.extracted_json
     activated = db.execute(update(TestSession).where(
         TestSession.id == session_id, TestSession.updated_at == observed_update,
@@ -439,7 +465,7 @@ async def _execute_extraction_turn(
 
     assistant_msg = ChatMessage(
         id=run_id, session_id=session_id, role="assistant",
-        content=result.summary_text if result.status == "success" else (result.error_message or "执行失败"),
+        content=result.summary_text if result.status in {"success", "partial"} else (result.error_message or "执行失败"),
         file_ids=selected_ids, agent_id=agent_id, agent_name=agent_name,
         status=result.status, extracted_json=result.extracted_json,
     )
@@ -487,7 +513,7 @@ async def run_session_turn(
             agent=agent,
             template=template,
             current_state=current,
-            request=request, cancelled=cancelled, strategy=payload.strategy,
+            request=request, cancelled=cancelled, strategy=payload.strategy, run_token=payload.run_token,
             use_demo_fallback=payload.use_demo_fallback,
         )
 
@@ -521,11 +547,13 @@ async def rerun_turn(
     # Determine JSON state prior to that user turn
     prev_state = None
     for i in range(user_idx - 1, -1, -1):
-        if msgs[i].role == "assistant" and msgs[i].status == "success" and msgs[i].extracted_json:
+        if msgs[i].role == "assistant" and msgs[i].status in {"success", "partial"} and msgs[i].extracted_json:
             prev_state = msgs[i].extracted_json
             break
 
     debug = target.debug_info or {}
+    if debug.get("strategy") == "manual_review":
+        raise HTTPException(status_code=409, detail="人工审核版本可重新核验来源或创建新的审核版本")
     paired = next((m for m in msgs if m.id == debug.get("input_message_id")), None)
     if paired:
         user_msg = paired
@@ -546,5 +574,6 @@ async def rerun_turn(
             template=template,
             current_state=prev_state,
             request=request, cancelled=cancelled, strategy=debug.get("strategy", "legacy"), history_limit=user_idx,
+            run_token=run_token,
             use_demo_fallback=use_demo_fallback,
         )

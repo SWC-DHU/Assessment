@@ -12,3 +12,7 @@ m:comparator a owl:DatatypeProperty ; rdfs:domain m:Constraint ; rdfs:range xsd:
 m:numericValue a owl:DatatypeProperty ; rdfs:domain m:Constraint ; rdfs:range xsd:decimal .
 m:measurementUnit a owl:DatatypeProperty ; rdfs:domain m:Constraint ; rdfs:range xsd:string .
 m:measurementBasis a owl:DatatypeProperty ; rdfs:domain m:Constraint ; rdfs:range xsd:string .
+
+m:QuantityConstraint a owl:Class ; rdfs:subClassOf m:Constraint ; rdfs:label "数量约束"@zh .
+m:QualityConstraint a owl:Class ; rdfs:subClassOf m:Constraint ; rdfs:label "质量约束"@zh .
+m:ConditionConstraint a owl:Class ; rdfs:subClassOf m:Constraint ; rdfs:label "工艺条件约束"@zh .

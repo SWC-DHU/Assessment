@@ -1,6 +1,6 @@
 # Assessment · 工艺需求智能体工作台
 
-Assessment 用于研究制造需求抽取、来源核验、工艺拓扑和模板填充。它包含 FastAPI、Pydantic 2、SQLAlchemy、SQLite 后端，以及 Vite、React 18、TypeScript、Ant Design 6 前端。
+Assessment 用于研究制造需求抽取、来源核验、工艺拓扑和模板填充。v2 提供可查询 RDF 本体、分批抽取、部分结果恢复和人工审核版本。它包含 FastAPI、Pydantic 2、SQLAlchemy、SQLite 后端，以及 Vite、React 18、TypeScript、Ant Design 6 前端。
 
 ## 启动
 
@@ -44,3 +44,15 @@ cd backend
 - [接口](docs/API.md)
 - [测试报告](docs/TEST_REPORT.md)
 - [迁移指南](docs/MIGRATION_GUIDE.md)
+
+
+### v2 混合来源回归
+
+```sh
+cd backend
+.venv/bin/python -m experiments.run --methods c --offline --repeat 3   --gold experiments/battery_module_gold.json   --expected-overlay experiments/battery_mixed_expectations.json   --input '../test case/工艺需求文件.xlsx'   --text-file '../test case/自然语言建模需求.md'
+```
+
+- [v2 现状审查](docs/REFACTOR_AUDIT.md)
+- [v2 语义与调用链](docs/REFACTOR_V2.md)
+- [v2 测试与实验报告](docs/REFACTOR_REPORT.md)

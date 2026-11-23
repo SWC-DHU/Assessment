@@ -1,0 +1,44 @@
+# v2 验证和交付
+
+验证日期为 2026-11-23，Asia/Shanghai。API 及浏览器验证使用隔离的 SQLite 和上传目录。源工作簿与自然语言文件保留在项目 `test case/`。真实 Provider 接收合成输入。Gold 仅用于评分，真实案例的自然语言由 `--text-file` 提供。
+
+## 自动化与浏览器
+
+| 项目 | 结果 |
+| --- | --- |
+| 开发前后端基线 | 33 项通过 |
+| `cd backend && .venv/bin/pytest -q` | 42 项通过 |
+| `cd frontend && npm run build` | TypeScript 与 Vite 构建通过。Vite 保留了原有类型的主包体积提示 |
+| Chrome 自动化 | 1512、1280、900、390、320 px。验证上传、来源、工艺图导出、RDF 目录、模板、人工子版本、刷新、实际执行进度和取消 |
+| Python wheel | 在工作区外运行 standalone 投影并加载 v1/v2 本体 |
+| 原始历史 | SQLite 与 `test case/` 保持原始内容。新增语义信息继续存入原 JSON 版本表 |
+
+浏览器脚本用真实工作簿验证绘图，另使用受控的本地慢响应 Provider 检查实时进度和取消。API 测试覆盖权限错误、模板与下载、历史版本、人工确认、截断恢复及部分结果。领域测试新增 RDF 端点校验、显式旁路与汇合、条件与物料状态、间接依赖、长来源分包。
+
+## 实际实验
+
+两份真实来源的三次离线运行内容摘要一致。工序 16/16，原始物料标签 29/29，范围内工艺与物料关系 58/58，三个 F1 均为 1.00。标签指标按原始单元格评分，并同时记录归并后的基础物料数量。产品、单项组件数量和节拍标注的 F1 均为 1.00。8 项受控能力映射准确率和引文定位率均为 1.00。图中 3 个旁路、两处汇合共 5 条汇合边，EOL 未给出的不合格去向保留为待确认。离线状态为部分完成，因为未覆盖的自然语言片段没有提交模型。实际耗时分别为 12.80、9.55 和 8.61 ms，模型请求数 0。
+
+| 合成用例 | 运行 | 结果 |
+| --- | --- | --- |
+| 单工序与节拍，A/B/C 同配置线上对照 | 1 次请求/方法。真实响应模型 `deepseek-v4.1-flash` | 工序 F1 均为 1.00。节拍 F1 分别为 0、0、1.00。总 Token 分别为 1396、2025、2277 |
+| 单工序与节拍，更新后的 C 流水线 | 1 次线上请求，2060 Token | 阶段完整，工序 F1 与节拍 F1 均为 1.00 |
+| 三工序，早期有界拆分试运行 | 3 次线上请求，累计 12413 Token，单批限制 2400 | 仍遇到 `length`。保留可核对的整线节拍，状态为部分完成，工序与关系 F1 均为 0 |
+| 同一三工序输入，更新后的显式编号条款工具 | 0 次请求 | 阶段完整，3/3 工序、9/9 关系、5/5 物料及节拍 F1 均为 1.00 |
+
+表中的两种三工序运行用于验证恢复过程和确定性解析范围，配置与代码有演进。旧实验结果继续保留原标识。新记录带 `A-2.0`、`B-2.0`、`C-2.0` 实现标签及评估、本体、词表、Prompt、Schema 版本。小样本结果用于功能验收，论文实验仍需多模型、重复运行和更多独立标注。
+
+## 关键文件
+
+| 范围 | 新增或调整 |
+| --- | --- |
+| 本体与契约 | 更新 `backend/domain_semantics/ontology/*.ttl`、`catalog.py`、`schema.py`、`candidates.py`、`vocabulary/manufacturing.yaml`。新增 `ontology/versions/1.0.0/` |
+| 领域处理 | 新增 `process_graph.py`、`review.py`、`structured_text.py`。更新 `pipeline.py`、`sources.py`、`validation.py`、`projection.py` 与抽取、修复 Prompt |
+| 智能体与 API | 新增 `backend/app/services/extraction_batches.py`、`semantic_tools.py`。更新 `semantic_execution.py`、`app/api/{sessions,semantics}.py`、`app/models/schemas.py`、`app/{config,main}.py`、后端打包及环境默认值 |
+| 工作台 | 新增 `frontend/src/components/RequirementTools.tsx`。更新 App、API 客户端、类型、Agent 设置、聊天、结果栏、工艺图和样式 |
+| 回归与实验 | 新增 `backend/tests/test_requirement_v2.py`、混合标注补充文件及 v2 实验记录。更新既有后端回归、实验运行器和浏览器脚本 |
+| 文档 | 新增 `REFACTOR_AUDIT.md`、`REFACTOR_V2.md` 和本报告，更新 README、架构、领域语义及 API 说明 |
+
+## 当前边界
+
+复杂跨段表述、扫描件 OCR、更多物料状态表达和自由文本组合关系仍需扩大覆盖。供应商推理模型可能在极低预算下占满单批输出。系统明确报告部分完成并保留已通过核对的事实。实时状态和取消目前依赖单进程内存。真实工作簿基准为离线运行，在线对照范围为合成用例。

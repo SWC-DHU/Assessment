@@ -1,0 +1,6 @@
+{
+  "name": "方形电池模组装配表与自然语言需求",
+  "products": ["标准模组"],
+  "product_components": [["标准模组", "方形电芯", 8, "个"]],
+  "numeric_constraints": [["line", "takt_time", "<=", 120, null, null, "s", "模组"]]
+}

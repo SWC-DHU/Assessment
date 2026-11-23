@@ -1049,7 +1049,7 @@ export function AgentManagerModal({
                       })} />
                   </label>
                   <label className="flex flex-col gap-1">单次运行请求预算
-                    <InputNumber aria-label="单次运行请求预算" min={1} max={4} placeholder="使用服务默认值"
+                    <InputNumber aria-label="单次运行请求预算" min={1} max={32} placeholder="使用服务默认值"
                       value={form.execution?.request_budget ?? null} onChange={(value) => setForm({
                         ...form, execution: { ...defaults, ...form.execution, request_budget: value },
                       })} />
@@ -1060,7 +1060,7 @@ export function AgentManagerModal({
                       onChange={(checked) => setForm({ ...form, execution: { ...defaults, ...form.execution, llm_disambiguation: checked } })} />
                   </div>
                 </div>
-                <p className="muted">格式降级、字段修复和术语消歧共享请求预算。当前领域 Schema、本体和词表版本可在结果概览查看。</p>
+                <p className="muted">分批抽取、格式降级、局部修复和消歧共享请求预算。当前领域 Schema、本体和词表版本可在结果概览查看。</p>
               </Card>
 
               {/* System Prompt & Rules */}

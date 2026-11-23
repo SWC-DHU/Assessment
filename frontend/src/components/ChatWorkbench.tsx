@@ -1,3 +1,5 @@
+import { RunProgress } from "./RequirementTools";
+import type { PipelineStage } from "../types";
 import { useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -32,6 +34,7 @@ interface ChatWorkbenchProps {
   samples: SampleDataset[];
   stage: RunStage;
   isRunning: boolean;
+  progress: PipelineStage[];
   demoMode: boolean;
   onToggleDemoMode: (val: boolean) => void;
   onUploadFiles: (files: File[]) => Promise<UploadedFile[]>;
@@ -65,6 +68,7 @@ export function ChatWorkbench({
   samples,
   stage,
   isRunning,
+  progress,
   demoMode,
   onToggleDemoMode,
   onUploadFiles,
@@ -194,6 +198,8 @@ export function ChatWorkbench({
         </div>
       </div>
 
+      {isRunning && <RunProgress steps={progress} />}
+
       {/* Messages Stream */}
       <div className="chat-stream flex-1 overflow-y-auto p-4 space-y-4" aria-live="polite">
         {messages.length === 0 ? (
@@ -286,7 +292,7 @@ export function ChatWorkbench({
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5 pb-1.5 border-b border-slate-100">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-slate-900">
-                          {msg.agent_name || "智能体"}
+                          {msg.agent_name || "智能体"}{msg.status === "partial" && <small className="chat-partial">部分完成</small>}
                         </span>
                         {msg.debug_info?.duration_ms !== undefined && (
                           <span className="text-[10px] font-mono text-slate-400">
@@ -312,7 +318,7 @@ export function ChatWorkbench({
                         >
                           查看 Debug
                         </button>
-                        <button
+                        {msg.debug_info?.strategy !== "manual_review" && <button
                           type="button"
                           disabled={isRunning}
                           onClick={() => onRerunMessage(msg.id)}
@@ -321,7 +327,7 @@ export function ChatWorkbench({
                         >
                           <RotateCcw className="w-2.5 h-2.5" />
                           <span>重跑</span>
-                        </button>
+                        </button>}
                       </div>
                     </div>
                   )}

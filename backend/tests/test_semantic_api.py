@@ -39,7 +39,7 @@ def test_workbook_revision_template_export_and_restore(api):
     url = f"/api/sessions/{session['id']}"
     versions = f"/api/semantics/sessions/{session['id']}/versions"
     catalog = api.get("/api/semantics/catalog").json()
-    assert catalog["ontology_version"] == "1.0.0"
+    assert catalog["ontology_version"] == "2.0.0"
     good, bad = api.post(f"{url}/files", files=[
         ("files", ("工艺需求文件.xlsx", paths[0].read_bytes())), ("files", ("损坏.xlsx", b"not an xlsx")),
     ]).json()
@@ -158,3 +158,48 @@ def test_cancel_before_run_does_not_leave_messages(api):
     result = api.post(f"{url}/run", json={"run_token": token, "message": "执行前取消"})
     assert result.status_code == 499
     assert api.get(url).json()["messages"] == []
+
+
+def test_human_review_creates_traceable_version_and_preserves_original(api):
+    session = api.post("/api/sessions", json={}).json()
+    sess = f"/api/sessions/{session['id']}"
+    versions = f"/api/semantics/sessions/{session['id']}/versions"
+    text = "工序编号,工序名称,工序类型\n01,清洗,主线\n02,检测,主线\n".encode()
+    f = api.post(f"{sess}/files", files={"files": ("route.csv", text)}).json()[0]
+    result = api.post(f"{sess}/run", json={"file_ids": [f["id"]], "use_demo_fallback": True}).json()
+    base = result["current_extracted_json"]["semantic"]
+    assert base["metadata"]["session_id"] == session["id"]
+    response = api.post(f"{versions}/{base['run_id']}/review", json={
+        "action": "add_transition", "source_id": "operation:01", "target_id": "operation:02",
+        "type": "conditionallyPrecedes", "condition": "工件干燥", "note": "工程师确认流转条件",
+    })
+    assert response.status_code == 201, response.text
+    child = response.json()
+    assert child["parent_version_id"] == base["run_id"]
+    assert child["process_graph"]["edges"][0]["kind"] == "conditional"
+    assert child["process_graph"]["edges"][0]["evidence"][0]["method"] == "manual"
+    persisted = api.get(f"{versions}/{child['run_id']}/graph").json()
+    assert persisted == child["process_graph"]
+    assert not api.get(f"{versions}/{base['run_id']}").json()["process_graph"]["edges"]
+    assert api.get(sess).json()["current_extracted_json"]["semantic"]["run_id"] == child["run_id"]
+    assert api.get("/api/semantics/catalog?version=1.0.0").json()["ontology_version"] == "1.0.0"
+    assert len(api.get("/api/semantics/tools").json()) == 9
+
+
+def test_partial_result_is_saved_with_unprocessed_scope(api):
+    session = api.post("/api/sessions", json={}).json()
+    url = f"/api/sessions/{session['id']}"
+    response = api.post(f"{url}/run", json={
+        "message": "整线生产节拍≤60秒/件。另需分析说明文档中的夹具兼容问题。", "use_demo_fallback": True,
+    })
+    assert response.status_code == 200
+    result = response.json()
+    assert result["assistant_message"]["status"] == "partial"
+    semantic = result["current_extracted_json"]["semantic"]
+    assert semantic["metadata"]["extraction_status"] == "partial"
+    reports = semantic["metadata"]["batches"]
+    assert len(reports) == 1 and reports[0]["reason"] == "offline"
+    assert semantic["constraints"][0]["value"] == 60
+    steps = {step["stage"] for step in result["assistant_message"]["debug_info"]["tool_trace"]}
+    assert {"query_ontology", "build_process_graph", "validate_constraints", "export_requirement_model"} <= steps
+    assert api.get(url).json()["current_extracted_json"]["semantic"]["run_id"] == semantic["run_id"]

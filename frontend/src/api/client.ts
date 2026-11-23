@@ -8,6 +8,7 @@ import type {
   OutputTemplate,
   OutputTemplatePayload,
   RunChatResponse,
+  OntologyCatalog, PipelineStage, ProcessGraph, ReviewRequest,
   SampleDataset,
   SemanticVersion,
   SemanticModel,
@@ -171,6 +172,17 @@ export const api = {
     request<void>(`/api/sessions/${id}`, { method: "DELETE" }),
   clearSession: (id: string) =>
     request<TestSessionDetail>(`/api/sessions/${id}/clear`, { method: "POST" }),
+
+  getOntology: (version?: string) =>
+    request<OntologyCatalog>(`/api/semantics/catalog${version ? `?version=${encodeURIComponent(version)}` : ""}`),
+  getProcessGraph: (sessionId: string, version: string) =>
+    request<ProcessGraph>(`/api/semantics/sessions/${sessionId}/versions/${version}/graph`),
+  reviewVersion: (sessionId: string, version: string, payload: ReviewRequest) =>
+    request<SemanticModel>(`/api/semantics/sessions/${sessionId}/versions/${version}/review`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  getRunProgress: (sessionId: string, token: string) =>
+    request<{ status: string; steps: PipelineStage[] }>(`/api/sessions/${sessionId}/runs/${token}/progress`),
 
   listVersions: (id: string) => request<SemanticVersion[]>(`/api/semantics/sessions/${id}/versions`),
   versionContext: (id: string, version: string) =>

@@ -14,3 +14,28 @@ m:branchesTo a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Opera
 m:mergesInto a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation .
 m:reworksTo a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation .
 m:conditionallyPrecedes a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation .
+
+m:precedes a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation ;
+    rdfs:comment "较早工序到较晚工序的时序；可以相隔多道工序。"@zh .
+m:dependsOn a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation ;
+    rdfs:comment "依赖方到所依赖工序；表达业务依赖。"@zh .
+m:directlyPrecedes a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation ;
+    rdfs:comment "从源工序明确直接转入目标工序。"@zh .
+m:optionalNext a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation ;
+    rdfs:comment "原文定义的可选转序。"@zh .
+m:hasInputState a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:MaterialState ;
+    rdfs:comment "工序需要明确指示的某个物料状态。"@zh .
+m:hasOutputState a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:MaterialState ;
+    rdfs:comment "工序产生明确指示的某个物料状态。"@zh .
+m:stateOf a owl:ObjectProperty ; rdfs:domain m:MaterialState ; rdfs:range m:Material ;
+    rdfs:comment "物料状态指向具有明确归属证据的基础物料。"@zh .
+m:hasPredecessor rdfs:comment "当前工序指向工作表或原文明确给出的直接前驱；不用于普通先后叙述。"@zh .
+m:hasComponent rdfs:comment "产品到物料或子产品的组成，可带每件数量及证据。"@zh .
+m:consumes rdfs:comment "工序到其使用或消耗的物料；跨工序转序独立表达。"@zh .
+m:produces rdfs:comment "工序到其产出的物料；跨工序转序独立表达。"@zh .
+m:requiresCapability rdfs:comment "工序到所需制造功能。"@zh .
+m:appliesTo rdfs:comment "约束到作用对象；对象范围应有来源。"@zh .
+m:branchesTo rdfs:comment "原文明确指定的工艺分支流向。"@zh .
+m:mergesInto rdfs:comment "由前序流向有来源证据的汇合工序。"@zh .
+m:reworksTo rdfs:comment "原文给定的返工流向，可形成受控回路。"@zh .
+m:conditionallyPrecedes rdfs:comment "原文明示的带条件转序。"@zh .

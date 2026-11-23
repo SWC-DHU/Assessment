@@ -5,11 +5,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
   ChatMessage, Evidence, OutputTemplate, ReviewState, SemanticEntity, SemanticGroup,
-  SemanticModel, SemanticVersion, TemplatePreviewResponse,
+  SemanticModel, SemanticVersion, TemplatePreviewResponse, PipelineStage, ProcessGraph, ReviewRequest,
 } from "../types";
 import { semanticFrom } from "../types";
 import { HtmlPreview } from "./HtmlPreview";
 import { groups, relationLabel, SemanticGraph } from "./SemanticGraph";
+import { OntologyBrowser, ReviewDialog, RunProgress, toolNames } from "./RequirementTools";
 
 const tabs = [
   { id: "overview", name: "概览", icon: LayoutGrid },
@@ -22,11 +23,13 @@ const tabs = [
 export type ResultTab = (typeof tabs)[number]["id"];
 
 const statusLabels: Record<string, string> = {
-  verified: "已核验", pending: "待确认", conflict: "来源冲突", invalid: "校验不通过",
+  verified: "语义校验通过", pending: "待确认", conflict: "来源冲突", invalid: "校验不通过",
+  confirmed: "人工确认", complete: "解析完成", failed: "解析失败", located: "来源已定位",
   unprocessed: "未处理", success: "完成", skipped: "未执行", error: "失败", partial: "部分完成",
 };
 
 const stageLabels: Record<string, string> = {
+  ...toolNames,
   file_parsing: "输入文件解析", input_selection: "来源选择", source_preprocessing: "来源预处理",
   deterministic_extraction: "确定性抽取", llm_extraction: "LLM 信息抽取", schema_validation: "候选 Schema 验证",
   llm_repair: "候选修复", ontology_mapping: "本体与术语映射", llm_disambiguation: "模型辅助消歧",
@@ -50,6 +53,10 @@ interface RightPanelProps {
   onVerify: (id: string) => Promise<SemanticModel["validation"]>;
   onProject: () => void;
   onOpenSource: (id: string) => void;
+  onReview: (id: string, payload: ReviewRequest) => Promise<void>;
+  onGraph: (id: string) => Promise<ProcessGraph>;
+  progress: PipelineStage[];
+  isRunning: boolean;
 }
 
 export function ReviewPill({ state }: { state: string }) {
@@ -77,7 +84,9 @@ function Citations({ model, items, onSource }: {
           {source?.kind === "file"
             ? <button type="button" className="text-action" onClick={() => onSource(cite.document_id)}>{source.name}</button>
             : source?.name || cite.document_id}
-          <span>{location(cite)}</span><ReviewPill state={cite.status} />
+          <span>{location(cite)}</span>
+          <span>{{ structured: "表格提取", llm: "模型候选", rule: "规则提取", manual: "人工确认", legacy: "历史来源" }[cite.method ?? "legacy"]}</span>
+          <ReviewPill state={cite.status === "verified" ? "located" : cite.status} />
         </figcaption>
       </figure>;
     })}
@@ -91,6 +100,10 @@ function EntityDetail({ model, selected, onSelect, onSource }: {
   const relations = model.relations.filter((edge) => edge.source_id === selected.id || edge.target_id === selected.id);
   const fields = [
     ["实体标识", selected.id], ["语义类型", selected.concept], ["工序编号", selected.number],
+    ["标准术语", selected.standard_term], ["映射依据", selected.mapping_basis],
+    ["基础物料", selected.material_id ? lookup.get(selected.material_id)?.name : null],
+    ["输入状态", selected.input_state_ids?.map((id) => lookup.get(id)?.name).filter(Boolean).join("、")],
+    ["输出状态", selected.output_state_ids?.map((id) => lookup.get(id)?.name).filter(Boolean).join("、")],
     ["工序类型", selected.operation_type], ["产品图号", selected.part_number], ["原始能力描述", selected.raw_names?.join("；")], ["设备要求", selected.equipment_requirement],
     ["能力编码", selected.code], ["映射候选", selected.candidates?.join("、")], ["物料类型", selected.material_type],
     ["参数编码", selected.parameter_code], ["比较符", selected.comparator],
@@ -100,12 +113,13 @@ function EntityDetail({ model, selected, onSelect, onSource }: {
   ].filter(([, value]) => value != null && value !== "");
   return <article className="entity-detail">
     <header><div><small>{selected.concept}</small><h3>{[selected.number, selected.name].filter(Boolean).join(" · ")}</h3></div>
-      <ReviewPill state={selected.status} /></header>
+      <div className="result-actions"><ReviewPill state={selected.status} />{selected.review === "confirmed" && <ReviewPill state="confirmed" />}</div></header>
     <dl className="fact-grid">
       {fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
     </dl>
     <h4>原文证据</h4>
     <Citations model={model} items={[...selected.evidence, ...(selected.equipment_evidence ?? [])]} onSource={onSource} />
+    {!!selected.review_evidence?.length && <><h4>人工审核依据</h4><Citations model={model} items={selected.review_evidence} onSource={onSource} /></>}
     {relations.length > 0 && <><h4>关联事实</h4><div className="relation-list">
       {relations.map((edge) => {
         const otherId = edge.source_id === selected.id ? edge.target_id : edge.source_id;
@@ -114,9 +128,12 @@ function EntityDetail({ model, selected, onSelect, onSource }: {
           <summary><span>{edge.source_id === selected.id ? "→" : "←"} {relationLabel(edge)} · {other?.name ?? (otherId === "line" ? "整线" : otherId)}</span>
             <ReviewPill state={edge.status} /></summary>
           {other && <button className="text-action" type="button" onClick={() => onSelect(other.id)}>查看 {other.name}</button>}
+          {edge.asserted_as === "inferred" && <p className="muted">候选推断 · 待人工确认</p>}
+          {edge.quantity && <p>组成数量 {edge.quantity.value} {edge.quantity.unit} {edge.quantity.basis && `· ${edge.quantity.basis}`}</p>}
+          {edge.review === "confirmed" && <ReviewPill state="confirmed" />}
           {edge.condition && <p>{edge.condition}</p>}
           {edge.max_iterations != null && <p>返工上限 {edge.max_iterations} 次</p>}
-          <Citations model={model} items={edge.evidence} onSource={onSource} />
+          <Citations model={model} items={[...edge.evidence, ...(edge.review_evidence ?? [])]} onSource={onSource} />
         </details>;
       })}
     </div></>}
@@ -158,6 +175,11 @@ function DebugView({ message }: { message: ChatMessage | null }) {
       {debug.finish_reason && <span>结束原因 <b>{debug.finish_reason}</b></span>}
       <span>阶段耗时 <b>{debug.duration_ms != null ? `${debug.duration_ms} ms` : "未记录"}</b></span>
     </div>
+    {!!debug.batches?.length && <details className="result-disclosure" open><summary>抽取批次 · {debug.batches.length}</summary>
+      <div className="batch-list">{debug.batches.map((batch) => <article key={batch.id}>
+        <div><strong>{batch.id}</strong> · {batch.scope}<br /><small>{batch.input_characters} 字符 · {batch.accepted_rows} 条候选 {batch.reason && `· ${batch.reason}`}</small></div>
+        <ReviewPill state={batch.status} />
+      </article>)}</div></details>}
     <ol className="run-stages">
       {debug.pipeline_stages?.map((stage, idx) => <li key={`${stage.stage}-${idx}`}>
         <details>
@@ -218,6 +240,8 @@ function Preview({ value, model, onSource }: {
 
 export function RightPanel(props: RightPanelProps) {
   const model = semanticFrom(props.extractedJson);
+  const [ontologyOpen, setOntologyOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [group, setGroup] = useState<SemanticGroup>("operations");
   const [selection, setSelection] = useState<string | null>(null);
   const [scope, setScope] = useState<"list" | "graph">("list");
@@ -272,6 +296,10 @@ export function RightPanel(props: RightPanelProps) {
         <div className="result-heading"><div><h3>制造需求概览</h3>
           <p>Schema {model.schema_version} · 本体 {model.ontology_version} · 词表 {model.vocabulary_version}</p></div>
         </div>
+        {model.metadata && <p className="muted">覆盖状态 <ReviewPill state={model.metadata.extraction_status} /></p>}
+        {!!model.modeling_intents?.length && <section className="intent-list"><h4>后续建模意图</h4>
+          <ul>{model.modeling_intents.map((item) => <li key={item.id}>{item.description}</li>)}</ul>
+        </section>}
         <div className="semantic-stats">
           {groups.map(([id, label]) => <button type="button" key={id} onClick={() => {
             setGroup(id); setScope("list"); setSelection(null); props.onTab("semantics");
@@ -288,6 +316,7 @@ export function RightPanel(props: RightPanelProps) {
             finally { setVerifying(false); }
           }}>重新核验来源</Button>
           <Button size="small" onClick={() => props.onRevise(model.run_id)}>基于此版本修订</Button>
+          <Button size="small" onClick={() => setReviewOpen(true)}>人工审核</Button>
         </div>
         {diagnostic && <Alert type="error" title={diagnostic} />}
         <section id="semantic-issues" className="issue-list"><h4>待确认与诊断</h4>
@@ -299,12 +328,18 @@ export function RightPanel(props: RightPanelProps) {
         description={props.extractedJson ? "当前会话包含旧版抽取结果" : "生成一次解析结果后，查看制造需求和来源"} />
         {canProject && <Button onClick={props.onProject}>从历史抽取生成语义版本</Button>}</div>)}
       {props.tab === "topology" && (model ? <div className="result-stack">
-        <div className="result-heading"><div><h3>工艺拓扑</h3><p>箭头沿工艺流向，虚线表示条件、特殊路径或待核验依赖。</p></div></div>
+        <div className="result-heading"><div><h3>工艺拓扑</h3><p>查看直接转序、前置依赖与条件关系</p></div>
+          <Button size="small" icon={<ArrowDownToLine size={15} />} onClick={async () => {
+            try { saveJson(model.process_graph ?? await props.onGraph(model.run_id), `process-graph-${model.run_id}.json`); }
+            catch (err) { setDiagnostic(String(err)); }
+          }}>导出图 JSON</Button></div>
+        {diagnostic && <Alert type="error" title={diagnostic} />}
         <SemanticGraph key="flow" model={model} flow selected={selection} onSelect={select} />
         {showDetail}
       </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有语义版本可用于绘制拓扑" />)}
       {props.tab === "semantics" && (model ? <div className="result-stack">
         <div className="result-heading"><h3>领域语义</h3><div className="result-actions">
+          <Button size="small" onClick={() => setOntologyOpen(true)}>浏览本体</Button>
           <Button size="small" type={scope === "list" ? "primary" : "default"} onClick={() => setScope("list")}>实体</Button>
           <Button size="small" type={scope === "graph" ? "primary" : "default"} onClick={() => setScope("graph")}>关系图</Button>
         </div></div>
@@ -343,7 +378,10 @@ export function RightPanel(props: RightPanelProps) {
         </div>
         <Preview value={props.templatePreview} model={model} onSource={props.onOpenSource} />
       </div>}
-      {props.tab === "debug" && <DebugView message={props.debugMessage} />}
+      {props.tab === "debug" && (props.isRunning ? <RunProgress steps={props.progress} /> : <DebugView message={props.debugMessage} />)}
+      {ontologyOpen && <OntologyBrowser version={model?.ontology_version} onClose={() => setOntologyOpen(false)} />}
+      {reviewOpen && model && <ReviewDialog model={model} onClose={() => setReviewOpen(false)}
+        onSubmit={(payload) => props.onReview(model.run_id, payload)} />}
     </div>
   </section>;
 }

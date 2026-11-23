@@ -1,7 +1,7 @@
 """Candidate exchange format. The model can propose facts and source pointers only."""
 from pydantic import Field
 
-from .schema import Comparator, DomainRecord, RelationKind
+from .schema import Comparator, DomainRecord, QuantitySpecification, RelationKind
 
 
 class Citation(DomainRecord):
@@ -33,6 +33,10 @@ class MaterialCandidate(NamedCandidate):
     material_type: str | None = None
 
 
+class MaterialStateCandidate(NamedCandidate):
+    material_id: str
+
+
 class ConstraintCandidate(NamedCandidate):
     target_id: str
     comparator: Comparator | None = None
@@ -50,6 +54,8 @@ class RelationCandidate(DomainRecord):
     target_id: str
     condition: str | None = None
     max_iterations: int | None = None
+    quantity: QuantitySpecification | None = None
+    inferred: bool = False
     evidence: list[Citation] = Field(min_length=1)
 
 
@@ -57,6 +63,7 @@ class ExtractionCandidates(DomainRecord):
     products: list[ProductCandidate] = Field(default_factory=list)
     operations: list[OperationCandidate] = Field(default_factory=list)
     materials: list[MaterialCandidate] = Field(default_factory=list)
+    material_states: list[MaterialStateCandidate] = Field(default_factory=list)
     capabilities: list[NamedCandidate] = Field(default_factory=list)
     constraints: list[ConstraintCandidate] = Field(default_factory=list)
     relations: list[RelationCandidate] = Field(default_factory=list)

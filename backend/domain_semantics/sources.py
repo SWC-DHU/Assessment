@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 import re
 
-from .schema import Evidence, Location, SourceRef
+from .schema import Evidence, EvidenceMethod, Location, SourceRef
 
 
 def digest(text: str) -> str:
@@ -17,13 +17,13 @@ class Fragment:
     text: str
     location: Location
 
-    def evidence(self, batch: str, quote: str | None = None) -> Evidence:
+    def evidence(self, batch: str, quote: str | None = None, method: EvidenceMethod = "structured") -> Evidence:
         quote = self.text if quote is None else quote
         start = self.text.index(quote)
         return Evidence(
             document_id=self.document_id, fragment_id=self.key, quote=quote,
             location=self.location.model_copy(update={"start": start, "end": start + len(quote)}),
-            extraction_batch=batch, status="verified",
+            extraction_batch=batch, method=method, status="verified",
         )
 
 
@@ -86,7 +86,7 @@ def file_document(document_id: str, name: str, text: str, preview: dict) -> Docu
 
 
 def locate(documents: list[Document], quote: object, batch: str, *,
-           document_id: str | None = None, fragment_id: str | None = None) -> list[Evidence]:
+           document_id: str | None = None, fragment_id: str | None = None, method: EvidenceMethod = "llm") -> list[Evidence]:
     if not isinstance(quote, str) or not quote.strip():
         return []
     hits = [
@@ -94,4 +94,4 @@ def locate(documents: list[Document], quote: object, batch: str, *,
         for fragment in document.fragments if (not fragment_id or fragment.key == fragment_id)
         and quote in fragment.text
     ]
-    return [hits[0].evidence(batch, quote)] if len(hits) == 1 else []
+    return [hits[0].evidence(batch, quote, method)] if len(hits) == 1 else []

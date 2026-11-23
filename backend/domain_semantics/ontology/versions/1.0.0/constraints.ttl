@@ -1,0 +1,14 @@
+@prefix m: <https://assessment.example.org/ontology/manufacturing#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+m:ProcessTimeConstraint a owl:Class ; rdfs:subClassOf m:Constraint ; rdfs:label "工时约束"@zh .
+m:WaitTimeConstraint a owl:Class ; rdfs:subClassOf m:Constraint ; rdfs:label "等待时长约束"@zh .
+m:BufferTimeConstraint a owl:Class ; rdfs:subClassOf m:Constraint ; rdfs:label "缓存时长约束"@zh .
+m:TaktTimeConstraint a owl:Class ; rdfs:subClassOf m:Constraint ; rdfs:label "生产节拍约束"@zh .
+m:parameterCode a owl:DatatypeProperty ; rdfs:domain m:Constraint ; rdfs:range xsd:string .
+m:comparator a owl:DatatypeProperty ; rdfs:domain m:Constraint ; rdfs:range xsd:string .
+m:numericValue a owl:DatatypeProperty ; rdfs:domain m:Constraint ; rdfs:range xsd:decimal .
+m:measurementUnit a owl:DatatypeProperty ; rdfs:domain m:Constraint ; rdfs:range xsd:string .
+m:measurementBasis a owl:DatatypeProperty ; rdfs:domain m:Constraint ; rdfs:range xsd:string .

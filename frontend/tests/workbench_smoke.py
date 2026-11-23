@@ -32,6 +32,7 @@ def verify_cancel(browser, base_url):
         page.get_by_label("输入工艺需求").fill("测试中止时的记录一致性。")
         page.get_by_role("button", name="发送测试").click()
         assert entered.wait(5), "Provider did not receive the running request"
+        expect(page.get_by_text("分批提取事实 batch-1 · 进行中", exact=True)).to_be_visible(timeout=1500)
         with page.expect_response(lambda response: response.url.endswith("/cancel")) as cancel:
             page.get_by_role("button", name="中止").click()
         assert cancel.value.status == 202
@@ -77,7 +78,16 @@ with sync_playwright() as pw:
     expect(page.get_by_role("heading", name="原文证据")).to_be_visible()
     page.get_by_role("button", name="放大").click()
     expect(page.get_by_text("120%", exact=True)).to_be_visible()
+    with page.expect_download() as graph_export:
+        page.get_by_role("button", name="导出图 JSON").click()
+    assert graph_export.value.suggested_filename.startswith("process-graph-")
     page.get_by_role("tab", name="语义模型").click()
+    page.get_by_role("button", name="浏览本体").click()
+    expect(page.get_by_role("dialog", name="领域本体 2.0.0")).to_be_visible()
+    page.get_by_role("tab", name="对象关系").click()
+    page.get_by_placeholder("搜索类、关系或属性").fill("directlyPrecedes")
+    expect(page.get_by_text("directlyPrecedes", exact=True)).to_be_visible()
+    page.keyboard.press("Escape")
     page.get_by_role("button", name="关系图").click()
     expect(page.get_by_role("region", name="语义关系图")).to_be_visible()
     page.get_by_role("tab", name="结构化数据").click()
@@ -103,6 +113,18 @@ with sync_playwright() as pw:
     expect(page.get_by_text("已生成语义版本。", exact=False)).to_have_count(2, timeout=12000)
     page.get_by_role("tab", name="模板预览").click()
     expect(page.get_by_role("cell", name="45", exact=True)).to_be_visible()
+    page.get_by_role("tab", name="概览").click()
+    page.get_by_role("button", name="人工审核").click()
+    dialog = page.get_by_role("dialog", name="人工审核 · 保存为新版本")
+    expect(dialog).to_be_visible()
+    control = dialog.get_by_label("工序", exact=True)
+    control.press("ArrowDown")
+    control.press("Enter")
+    dialog.get_by_label("修正名称").fill("已审核工序")
+    dialog.get_by_label("审核依据").fill("现场核对工序名称")
+    dialog.get_by_role("button", name="保存审核版本").click()
+    expect(dialog).to_be_hidden()
+    expect(page.get_by_text("已保存人工审核版本。", exact=True)).to_be_visible()
     page.reload()
     expect(page.get_by_text("已生成语义版本。", exact=False)).to_have_count(2)
     for width in (1280, 900, 390, 320):

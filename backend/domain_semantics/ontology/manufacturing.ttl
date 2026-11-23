@@ -3,13 +3,31 @@
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 
 <https://assessment.example.org/ontology/manufacturing> a owl:Ontology ;
-    owl:versionInfo "1.0.0" ;
-    owl:versionIRI <https://assessment.example.org/ontology/manufacturing/1.0.0> .
+    owl:versionInfo "2.0.0" ;
+    owl:versionIRI <https://assessment.example.org/ontology/manufacturing/2.0.0> .
 
-m:Product a owl:Class ; rdfs:label "产品"@zh .
-m:Operation a owl:Class ; rdfs:label "工序"@zh .
-m:Material a owl:Class ; rdfs:label "物料"@zh .
-m:Capability a owl:Class ; rdfs:label "制造能力需求"@zh .
-m:Constraint a owl:Class ; rdfs:label "约束"@zh .
+m:Product a owl:Class ; rdfs:label "产品"@zh ; rdfs:comment "制造过程中要求生产的最终或中间产品。"@zh .
+m:Operation a owl:Class ; rdfs:label "工序"@zh ; rdfs:comment "制造过程所需完成、可引用的制造活动。"@zh .
+m:Material a owl:Class ; rdfs:label "物料"@zh ; rdfs:comment "制造过程中使用、消耗或产出的材料和零部件。"@zh .
+m:Capability a owl:Class ; rdfs:label "制造能力需求"@zh ; rdfs:comment "工序所需的制造功能。"@zh .
+m:Constraint a owl:Class ; rdfs:label "约束"@zh ; rdfs:comment "对产品、工序、能力或整线的必要或期望要求。"@zh .
 m:ProcessRelation a owl:Class ; rdfs:label "语义关系实例"@zh .
 m:ProductionLine a owl:Class ; rdfs:label "生产线"@zh .
+
+m:MaterialState a owl:Class ; rdfs:label "物料状态"@zh ;
+    rdfs:comment "同一物料在制造过程中的可追溯状态，需有明确的归属证据。"@zh .
+m:ProcessTransition a owl:Class ; rdfs:subClassOf m:ProcessRelation ;
+    rdfs:label "工艺转移"@zh .
+m:QuantitySpecification a owl:Class ; rdfs:label "数量与计量单位"@zh .
+m:Evidence a owl:Class ; rdfs:label "来源证据"@zh .
+m:ValidationIssue a owl:Class ; rdfs:label "校验问题"@zh .
+
+m:identifier a owl:DatatypeProperty ; rdfs:range <http://www.w3.org/2001/XMLSchema#string> ;
+    rdfs:label "实例标识"@zh .
+m:canonicalTerm a owl:DatatypeProperty ; rdfs:label "标准术语"@zh .
+m:alias a owl:DatatypeProperty ; rdfs:label "原始表达或别名"@zh .
+m:operationNumber a owl:DatatypeProperty ; rdfs:domain m:Operation ; rdfs:label "原始工序编号"@zh .
+m:operationCategory a owl:DatatypeProperty ; rdfs:domain m:Operation ; rdfs:label "原始工序类别"@zh .
+m:relationKind a owl:DatatypeProperty ; rdfs:domain m:ProcessRelation ; rdfs:label "关系类型"@zh .
+m:transitionCondition a owl:DatatypeProperty ; rdfs:domain m:ProcessTransition ; rdfs:label "转移条件"@zh .
+m:constraintScope a owl:DatatypeProperty ; rdfs:domain m:Constraint ; rdfs:label "约束作用范围"@zh .

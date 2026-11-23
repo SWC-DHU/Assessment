@@ -67,15 +67,28 @@ def score(data, gold, docs, *, schema_valid):
                for item in rows(data, group) if isinstance(item.get("id"), str)}
     predicted_ops = {(op.get("number"), op.get("name")) for op in ops
                      if isinstance(op.get("name"), str) and (op.get("number") is None or isinstance(op["number"], str))}
-    predicted_edges = {(edge["type"], lookups.get(edge["source_id"], edge["source_id"]),
-                        lookups.get(edge["target_id"], edge["target_id"]))
-                       for edge in rows(data, "relations")
-                       if all(isinstance(edge.get(field), str) for field in ("type", "source_id", "target_id"))
-                       and edge["type"] in scope and edge.get("status") in {None, "verified"}}
+    predicted_edges = set()
+    is_v2_model = data.get("schema_version") == "2.0.0"
+    for edge in rows(data, "relations"):
+        if (not all(isinstance(edge.get(field), str) for field in ("type", "source_id", "target_id"))
+                or edge["type"] not in scope or edge.get("status") not in {None, "verified"}):
+            continue
+        kind = edge["type"]
+        target = lookups.get(edge["target_id"], edge["target_id"])
+        labels = [target]
+        if is_v2_model and kind in {"consumes", "produces"}:
+            labels = [cite["quote"] for cite in rows(edge, "evidence") if cite.get("method") == "structured"
+                      and isinstance(cite.get("quote"), str) and (cite.get("location") or {}).get("cell")] or labels
+        for label in labels:
+            predicted_edges.add((kind, lookups.get(edge["source_id"], edge["source_id"]), label))
+    canonical_material_count = len(observed_materials)
+    if is_v2_model and "rows" in gold:
+        # Gold annotates workbook labels, including explicitly named process states.
+        observed_materials = {target for kind, _, target in predicted_edges if kind in {"consumes", "produces"}}
     expected_quantities = {tuple(item) for item in gold["numeric_constraints"]}
     predicted_quantities = set()
     for item in rows(data, "constraints"):
-        if item.get("status") not in {None, "verified"} or not isinstance(item.get("value", item.get("lower")), (float, int)):
+        if item.get("status") not in {None, "verified"} or not any(isinstance(item.get(key), (float, int)) for key in ("value", "lower")):
             continue
         if not isinstance(item.get("target_id"), str) or not isinstance(item.get("name"), str):
             continue
@@ -88,13 +101,23 @@ def score(data, gold, docs, *, schema_valid):
             continue
         fields[4] = canonical_unit(fields[4])
         predicted_quantities.add((lookups.get(item["target_id"], item["target_id"]), code, *fields))
+    expected_components = {tuple(item) for item in gold.get("product_components", []) if len(item) == 4}
+    actual_components = {
+        (lookups.get(edge.get("source_id")), lookups.get(edge.get("target_id")),
+         edge["quantity"].get("value"), edge["quantity"].get("unit"))
+        for edge in rows(data, "relations") if edge.get("type") == "hasComponent"
+        and edge.get("status") in {None, "verified"} and isinstance(edge.get("quantity"), dict)
+        and set(edge["quantity"]) >= {"value", "unit"} and isinstance(edge["quantity"]["value"], (float, int))
+        and isinstance(edge["quantity"]["unit"], str)
+        and all(isinstance(edge.get(field), str) for field in ("source_id", "target_id"))
+    }
     gold_mapping = gold["mapping_sample"]
     mapped = {value["name"]: value.get("code") for value in rows(data, "capabilities")
               if isinstance(value.get("name"), str)}
     mapped_correct = sum(mapped.get(name) == code for name, code in gold_mapping.items())
     mapped_count = sum(isinstance(mapped.get(name), str) for name in gold_mapping)
     matched_quotes = total_quotes = uncited = fact_count = 0
-    for group in ("products", "operations", "materials", "capabilities", "constraints", "relations"):
+    for group in ("products", "operations", "materials", "material_states", "capabilities", "constraints", "relations"):
         for item in rows(data, group):
             cites = rows(item, "evidence")
             if not cites and isinstance(item.get("source_quote"), str):
@@ -112,6 +135,9 @@ def score(data, gold, docs, *, schema_valid):
         "operation_entity": prf(gold_ops, predicted_ops),
         "material_entity": prf(gold_materials, observed_materials),
         "product_entity": prf(gold_products, observed_products),
+        "component_quantities": prf(expected_components, actual_components),
+        "canonical_material_count": canonical_material_count,
+        "material_state_count": len(rows(data, "material_states")),
         "process_relations": prf(gold_relations, predicted_edges),
         "numeric_constraints": prf(expected_quantities, predicted_quantities),
         "mapping_accuracy": mapped_correct / mapped_count if mapped_count else None,
@@ -141,7 +167,9 @@ def config_for(args):
 
 
 async def run(args):
-    gold = json.loads(args.gold.read_text(encoding="utf-8"))
+    gold_text = args.gold.read_text(encoding="utf-8")
+    overlay_text = args.expected_overlay.read_text(encoding="utf-8") if args.expected_overlay else "{}"
+    gold = json.loads(gold_text) | json.loads(overlay_text)
     methods = args.methods.lower().split(",")
     if set(methods) - {"a", "b", "c"}:
         raise SystemExit("方法应为 a,b,c 的子集")
@@ -154,7 +182,7 @@ async def run(args):
         files = [file_document("experiment-input", args.input.name, parsed.parsed_text, parsed.parsed_preview)]
     else:
         files = []
-    text = gold.get("input") or ("" if args.offline else TASK)
+    text = args.text_file.read_text(encoding="utf-8") if args.text_file else gold.get("input") or ("" if args.offline else TASK)
     message = message_document("experiment-message", text)
     config = config_for(args)
     if not args.offline and (not config.api_key or config.base_url.startswith("mock://")):
@@ -176,22 +204,28 @@ async def run(args):
                 data = redact(result.extracted_json or {}, config.api_key)
                 schema_valid = result.extracted_json is not None and not candidate_errors(data)
             output.append({
-                "method": method.upper(), "trial": trial + 1, "status": result.status,
+                "method": method.upper(), "implementation": f"{method.upper()}-2.0",
+                "trial": trial + 1, "status": result.status,
+                "coverage_status": result.debug_info.get("extraction_status"),
+                "finish_reason": result.debug_info.get("finish_reason"),
                 "elapsed_ms": round((perf_counter() - start) * 1000, 2),
                 "calls": result.debug_info.get("request_count"), "usage": result.debug_info.get("usage") or None,
                 "response_model": result.debug_info.get("model_used"), "error_code": result.debug_info.get("error_code"),
                 "prompt_digest": digest(result.debug_info.get("system_prompt") or ""),
                 "output_digest": data.get("content_digest") or digest(json.dumps(data, ensure_ascii=False, sort_keys=True)),
-                "metrics": score(data, gold, docs, schema_valid=schema_valid),
+                "metrics": score(data, gold, docs, schema_valid=schema_valid) |
+                           {"output_complete": (result.debug_info.get("extraction_status") == "complete") if method == "c"
+                            else schema_valid and result.debug_info.get("finish_reason") != "length"},
             })
     return {
         "created_at": datetime.now(timezone.utc).isoformat(), "input": gold["name"],
         "input_digest": digest(json.dumps([doc.ref.content_sha256 for doc in docs])),
-        "gold_digest": digest(args.gold.read_text(encoding="utf-8")),
+        "gold_digest": digest(gold_text + "\n" + overlay_text),
         "configuration": {
             "provider": safe_endpoint(config.base_url), "model": config.model, "temperature": config.temperature,
             "max_tokens": config.max_tokens, "timeout_s": config.timeout_seconds, "request_budget": config.request_budget,
             "json_mode": config.json_mode, "offline": args.offline, "prompt_version": PROMPT_VERSION,
+            "evaluation_version": "2.0.0",
             "schema_version": SCHEMA_VERSION, "ontology_version": metadata["ontology_version"],
             "vocabulary_version": metadata["vocabulary"]["version"],
         },
@@ -207,14 +241,16 @@ async def run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path)
+    parser.add_argument("--text-file", type=Path, help="补充用户需求；只发送该文件与 --input 的原始输入")
     parser.add_argument("--gold", type=Path, required=True)
+    parser.add_argument("--expected-overlay", type=Path, help="仅供评分的额外标注文件")
     parser.add_argument("--methods", default="a,b,c")
     parser.add_argument("--saved-agent", help="智能体 ID 或 first，密钥仅读入内存")
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--repeat", type=int, default=1, choices=range(1, 21))
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=2400)
-    parser.add_argument("--budget", type=int, choices=range(1, 5), default=1)
+    parser.add_argument("--budget", type=int, choices=range(1, 33), default=1)
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()

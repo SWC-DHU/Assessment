@@ -5,14 +5,17 @@ import type { SemanticEntity, SemanticModel, SemanticRelation } from "../types";
 
 export const groups = [
   ["products", "产品"], ["operations", "工序"], ["materials", "物料"],
-  ["capabilities", "制造能力"], ["constraints", "约束"],
+  ["material_states", "物料状态"], ["capabilities", "制造能力"], ["constraints", "约束"],
 ] as const;
 
 const flowKinds = new Set(["hasPredecessor", "branchesTo", "mergesInto", "reworksTo", "conditionallyPrecedes"]);
 const labels: Record<string, string> = {
   hasPredecessor: "直接依赖", branchesTo: "分支", mergesInto: "汇合", reworksTo: "返工",
   conditionallyPrecedes: "条件", hasComponent: "组成", consumes: "消耗", produces: "产出",
-  requiresCapability: "需要能力", appliesTo: "作用于",
+  requiresCapability: "需要能力", appliesTo: "作用于", hasInputState: "输入状态", hasOutputState: "输出状态", stateOf: "归属物料",
+  precedes: "先后", dependsOn: "依赖", directlyPrecedes: "直接转序", optionalNext: "可选转序",
+  declared_predecessor: "直接前驱", direct_transition: "直接转序", precedence: "先后", dependency: "依赖",
+  branch: "分支", merge: "汇合", conditional: "条件", rework: "返工", optional: "可选转序",
 };
 
 export function relationLabel(edge: SemanticRelation) {
@@ -33,7 +36,7 @@ function layout(nodes: SemanticEntity[], edges: GraphEdge[], flow: boolean) {
     for (let pass = 0; pass < nodes.length; pass += 1) {
       let changed = false;
       for (const { edge, from, to } of edges) {
-        if (edge.type === "reworksTo" || edge.status === "invalid") continue;
+        if (["reworksTo", "rework", "dependency"].includes(edge.type) || edge.status !== "verified") continue;
         const current = depths.get(to) ?? 0;
         const level = (depths.get(from) ?? 0) + 1;
         if (current < level && level < nodes.length) {
@@ -44,7 +47,7 @@ function layout(nodes: SemanticEntity[], edges: GraphEdge[], flow: boolean) {
       if (!changed) break;
     }
   }
-  const kinds = ["Product", "Operation", "Material", "Capability", "Constraint", "ProductionLine"];
+  const kinds = ["Product", "Operation", "Material", "MaterialState", "Capability", "Constraint", "ProductionLine"];
   nodes.forEach((node) => {
     const column = flow ? (depths.get(node.id) ?? 0) : kinds.indexOf(node.concept);
     const bucket = buckets.get(column) ?? [];
@@ -75,10 +78,13 @@ export function SemanticGraph({ model, flow, selected, onSelect }: {
   useEffect(() => { setFocus(""); setZoom(1); setKind(""); }, [model.run_id, flow]);
   const entities = useMemo(() => groups.flatMap(([key]) => model[key]), [model]);
   const graph = useMemo(() => {
-    const links = model.relations.filter((edge) => (flow ? flowKinds.has(edge.type) : !kind || edge.type === kind))
+    const oldLinks = model.relations.filter((edge) => (flow ? flowKinds.has(edge.type) : !kind || edge.type === kind))
       .map((edge) => flow && edge.type === "hasPredecessor"
         ? { edge, from: edge.target_id, to: edge.source_id }
         : { edge, from: edge.source_id, to: edge.target_id });
+    const links = flow && model.process_graph ? model.process_graph.edges.map((edge) => ({
+      from: edge.source, to: edge.target, edge: { ...edge, type: edge.kind, source_id: edge.source, target_id: edge.target },
+    })) : oldLinks;
     const neighborhood = new Set([focus]);
     links.filter(({ from, to }) => from === focus || to === focus).forEach(({ from, to }) => {
       neighborhood.add(from);
@@ -116,6 +122,9 @@ export function SemanticGraph({ model, flow, selected, onSelect }: {
           <button type="button" aria-label="重置缩放" onClick={() => setZoom(1)}><RotateCcw size={13} /></button>
         </div>
       </div>
+      {flow && model.process_graph && <div className="graph-legend">
+        <span>直接或汇合</span><span>条件、返工、先后及待确认</span>
+      </div>}
       {graph.nodes.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前版本没有可显示的节点" /> :
         <div className="graph-scroll" tabIndex={0} aria-label="可滚动的关系图">
           <div style={{ width: graph.width * zoom, height: graph.height * zoom }}>
@@ -142,7 +151,7 @@ export function SemanticGraph({ model, flow, selected, onSelect }: {
                   return <path key={edge.id} d={path} fill="none" markerEnd={`url(#${marker})`}
                     stroke={edge.status === "invalid" ? "#a75447" : highlighted ? "#426a51" : "#94a99c"}
                     strokeWidth={highlighted ? 2.4 : 1.3}
-                    strokeDasharray={edge.type === "hasPredecessor" && edge.status === "verified" ? undefined : "4 3"}>
+                    strokeDasharray={["hasPredecessor", "declared_predecessor", "direct_transition", "merge"].includes(edge.type) && edge.status === "verified" ? undefined : "4 3"}>
                     <title>{[relationLabel(edge), edge.condition].filter(Boolean).join(" · ")}</title>
                   </path>;
                 })}

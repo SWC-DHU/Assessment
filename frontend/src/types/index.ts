@@ -120,6 +120,10 @@ export interface UploadedFile {
 
 export interface DebugInfo {
   pipeline_stages?: PipelineStage[];
+  batches?: ExtractionBatch[];
+  extraction_status?: ExtractionStatus;
+  tool_trace?: PipelineStage[];
+  strategy?: "semantic" | "legacy" | "manual_review";
   error_code?: string;
   finish_reason?: string | null;
   requested_model?: string;
@@ -152,7 +156,7 @@ export interface ChatMessage {
   file_ids: string[];
   agent_id?: string | null;
   agent_name?: string | null;
-  status: "success" | "error";
+  status: "success" | "partial" | "error";
   extracted_json?: Record<string, unknown> | null;
   debug_info?: DebugInfo | null;
   created_at: string;
@@ -223,7 +227,7 @@ export interface EnvStatus {
 }
 
 export type ReviewState = "verified" | "pending" | "conflict" | "invalid" | "unprocessed";
-export type SemanticGroup = "products" | "operations" | "materials" | "capabilities" | "constraints";
+export type SemanticGroup = "products" | "operations" | "materials" | "material_states" | "capabilities" | "constraints";
 
 export interface Evidence {
   document_id: string;
@@ -241,6 +245,7 @@ export interface Evidence {
     end?: number | null;
   };
   extraction_batch: string;
+  method?: "legacy" | "structured" | "rule" | "llm" | "manual";
   status: ReviewState;
 }
 
@@ -250,6 +255,13 @@ export interface SemanticEntity {
   concept: string;
   status: ReviewState;
   evidence: Evidence[];
+  review?: "confirmed" | "unreviewed";
+  review_evidence?: Evidence[];
+  standard_term?: string | null;
+  mapping_basis?: string | null;
+  material_id?: string;
+  input_state_ids?: string[];
+  output_state_ids?: string[];
   number?: string | null;
   operation_type?: string | null;
   predecessor_ids?: string[];
@@ -289,6 +301,10 @@ export interface SemanticRelation {
   target_id: string;
   condition?: string | null;
   max_iterations?: number | null;
+  quantity?: QuantitySpecification | null;
+  asserted_as?: "explicit" | "inferred";
+  review?: "confirmed" | "unreviewed";
+  review_evidence?: Evidence[];
   evidence: Evidence[];
   status: ReviewState;
 }
@@ -308,6 +324,9 @@ export interface SemanticModel extends Record<SemanticGroup, SemanticEntity[]> {
   parent_version_id: string | null;
   content_digest: string;
   input_digest: string;
+  metadata?: { extraction_status: ExtractionStatus; batches: ExtractionBatch[] } | null;
+  modeling_intents?: { id: string; kind: string; description: string; evidence: Evidence[] }[];
+  process_graph?: ProcessGraph | null;
   source_refs: { document_id: string; name: string; kind: string }[];
   relations: SemanticRelation[];
   unresolved_items: SemanticIssue[];
@@ -328,9 +347,48 @@ export interface PipelineStage {
   started_at?: string;
   ended_at?: string;
   duration_ms?: number;
+  input_summary?: string;
+  batch_id?: string | null;
   error_code?: string | null;
 }
 
 export function semanticFrom(data: Record<string, unknown> | null | undefined) {
-  return (data?.semantic as SemanticModel | undefined) ?? null;
+  const model = data?.semantic as SemanticModel | undefined;
+  return model && (model.material_states ? model : { ...model, material_states: [] }) || null;
 }
+
+
+export type ExtractionStatus = "complete" | "partial" | "failed";
+export interface ExtractionBatch {
+  id: string;
+  scope: string;
+  status: "complete" | "partial" | "failed" | "unprocessed";
+  input_characters: number;
+  accepted_rows: number;
+  reason?: string | null;
+}
+export interface QuantitySpecification { value: number; unit: string; basis?: string }
+export interface ProcessGraph {
+  nodes: { id: string; number?: string | null; name: string; category: string }[];
+  edges: { id: string; source: string; target: string; kind: string; direct: boolean;
+    condition?: string | null; max_iterations?: number | null; status: ReviewState;
+    evidence: Evidence[]; relation_ids: string[] }[];
+  issues: SemanticIssue[];
+}
+export interface OntologyTerm {
+  id: string; iri: string; label: string; definition: string; domain: string[]; range: string[]; subclass_of: string[];
+}
+export interface OntologyCatalog {
+  ontology_version: string;
+  classes: OntologyTerm[];
+  object_properties: OntologyTerm[];
+  data_properties: OntologyTerm[];
+  vocabulary: { capabilities: Record<string, string[]> };
+}
+export type ReviewRequest = { note: string } & (
+  { action: "rename_operation"; operation_id: string; name: string }
+  | { action: "set_component_quantity"; relation_id: string; quantity: QuantitySpecification }
+  | { action: "confirm_capability"; capability_id: string; code: string }
+  | { action: "add_transition"; source_id: string; target_id: string; type: string; condition?: string; max_iterations?: number }
+  | { action: "confirm_fact"; fact_id: string }
+);
