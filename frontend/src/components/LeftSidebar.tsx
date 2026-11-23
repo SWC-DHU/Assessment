@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button, Input, Popconfirm, Tooltip } from "antd";
 import { Eye, Files, History, Plus, RotateCcw, Search, Trash2 } from "lucide-react";
 import type { TestSessionSummary, UploadedFile } from "../types";
-import { ReviewPill } from "./RightPanel";
+import { ReviewPill } from "./SemanticDetails";
 
 interface LeftSidebarProps {
   sessions: TestSessionSummary[];

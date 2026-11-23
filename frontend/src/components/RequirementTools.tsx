@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Form, Input, InputNumber, Modal, Select, Tabs } from "antd";
 import { api } from "../api/client";
 import type { OntologyCatalog, OntologyTerm, PipelineStage, ReviewRequest, SemanticModel } from "../types";
-import { groups } from "./SemanticGraph";
+import { groups } from "./semanticPresentation";
 
 export const toolNames: Record<string, string> = {
   parse_document: "读取文档与定位来源", extract_facts: "分批提取事实", query_ontology: "查询本体",

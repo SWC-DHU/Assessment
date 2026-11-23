@@ -261,13 +261,11 @@ button:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus
 .issue-list article { display: flex; align-items: start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .issue-list p { margin: 0; font-size: 12px; }
 .issue-list code { color: var(--subtle); font-size: 10px; }
-.entity-list, .relation-list { display: grid; max-height: 245px; overflow: auto; gap: 4px; }
-.relation-list { max-height: none; }
-.entity-list button, .relation-list details {
+.relation-list { display: grid; overflow: auto; gap: 4px; }
+.relation-list details {
   display: flex; padding: 8px 10px; align-items: center; justify-content: space-between;
   border: 1px solid var(--line); border-radius: 7px; gap: 8px; background: var(--surface); color: var(--ink); text-align: left; font-size: 12px;
 }
-.entity-list button:hover, .entity-list button[aria-pressed="true"] { background: var(--accent-faint); border-color: #bbcbbf; }
 .entity-detail { border: 1px solid var(--line); padding: 12px; border-radius: 10px; overflow-wrap: anywhere; }
 .entity-detail header { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .entity-detail header small { font-size: 10px; color: var(--subtle); }
@@ -280,25 +278,6 @@ button:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus
 .citation-list figcaption { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--subtle); font-size: 10px; }
 .text-action { border: 0; background: transparent; color: #3e6a50; font-size: inherit; padding: 0; text-align: left; }
 .text-action:hover { text-decoration: underline; }
-.graph-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
-.graph-toolbar .ant-select { min-width: 110px; max-width: 100%; }
-.graph-zoom { display: inline-flex; align-items: center; gap: 4px; }
-.graph-zoom button { background: white; border: 1px solid var(--line); color: var(--ink); border-radius: 6px; display: grid; place-items: center; width: 27px; height: 25px; }
-.graph-zoom output { font-size: 11px; color: var(--subtle); min-width: 32px; }
-.graph-scroll { overflow: auto; min-height: 160px; max-height: 340px; max-width: 100%; border-radius: 8px; border: 1px solid var(--line);
-  background: radial-gradient(#dce5de 1px, transparent 1px) 0 0 / 16px 16px, var(--paper); }
-.graph-canvas { transform-origin: top left; position: relative; }
-.graph-node {
-  position: absolute; padding: 7px 9px; display: grid; gap: 2px; align-content: center; text-align: left;
-  border: 1px solid #bdcfc2; border-radius: 8px; color: var(--ink); background: white;
-}
-.graph-node[data-concept="Material"] { background: #edf3f1; }
-.graph-node[data-concept="Capability"] { background: #eef2f6; }
-.graph-node[data-concept="Constraint"] { background: #f7f1e8; }
-.graph-node[data-concept="Product"] { background: #e8f0e9; }
-.graph-node[aria-pressed="true"] { border: 2px solid var(--accent); background: #e2eee5; }
-.graph-node small { color: var(--subtle); font-size: 10px; }
-.graph-node span { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-body[data-view="topology"] { display: flex; flex-direction: column; overflow: hidden; }
 .topology-stack, .topology-graph { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
 .topology-stack { gap: 10px; }
@@ -508,4 +487,103 @@ button:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus
 .graph-node[data-concept="MaterialState"] { background: #e3efed; }
 .review-pill[data-state="confirmed"], .review-pill[data-state="complete"], .review-pill[data-state="located"] {
   background: var(--accent-faint); color: #335641;
+}
+
+.result-validation-button { display: inline-flex; padding: 0; border: 0; border-radius: 20px; background: transparent; }
+.result-validation-button:hover .review-pill { box-shadow: inset 0 0 0 1px currentColor; }
+.result-body[data-view="semantics"] { display: flex; flex-direction: column; overflow: hidden; }
+.semantic-workspace, .semantic-graph-panel {
+  display: flex; flex: 1; flex-direction: column; gap: 9px; min-width: 0; min-height: 0;
+}
+.semantic-heading { flex: none; }
+.semantic-heading .result-actions { gap: 5px; }
+.semantic-layout {
+  display: grid; flex: 1; min-width: 0; min-height: 0; gap: 10px;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+.semantic-layout[data-detail="true"] { grid-template-rows: minmax(0, 1fr) min(43%, 330px); }
+.semantic-directory, .semantic-graph-panel, .semantic-detail { min-width: 0; min-height: 0; }
+.semantic-directory {
+  display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface);
+}
+.semantic-layout:not([data-mode="list"]) .semantic-directory { display: none; }
+.semantic-directory-tools { flex: none; display: grid; gap: 8px; padding: 10px; border-bottom: 1px solid var(--line); }
+.semantic-filter-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.semantic-select {
+  min-height: 27px; min-width: 0; max-width: 100%; padding: 2px 5px; border: 1px solid var(--line);
+  border-radius: 5px; background: var(--surface); color: var(--ink); font-size: 11px;
+}
+.semantic-directory-results {
+  display: flex; flex: 1; flex-direction: column; gap: 4px; overflow: auto; min-height: 0;
+  overscroll-behavior: contain; scrollbar-gutter: stable; padding: 7px;
+}
+.semantic-directory-results > .muted { margin: 9px 5px; }
+.semantic-row {
+  display: flex; flex: none; align-items: center; justify-content: space-between; gap: 7px; text-align: left;
+  color: var(--ink); border: 1px solid transparent; border-radius: 6px; background: var(--surface); padding: 8px; font-size: 12px;
+}
+.semantic-row > span:first-child { display: grid; min-width: 0; gap: 3px; overflow-wrap: anywhere; }
+.semantic-row small { color: var(--subtle); font-size: 10px; }
+.semantic-row:hover { background: var(--paper); }
+.semantic-row[aria-pressed="true"] { background: var(--accent-faint); border-color: #adbfaf; }
+.semantic-graph-panel { gap: 6px; }
+.semantic-graph-tools { flex: none; display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; }
+.semantic-focus { display: flex; gap: 7px; align-items: center; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.semantic-graph-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--subtle); font-size: 10px; }
+.semantic-graph-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.semantic-graph-legend span::before { content: ""; width: 13px; border-top: 1px solid var(--accent); }
+.semantic-graph-legend [data-state="pending"]::before { border-top: 1px dashed var(--warning); }
+.semantic-graph-legend [data-state="invalid"]::before { border-top: 2px solid var(--error); }
+.semantic-board { position: relative; flex: 1; min-height: 0; min-width: 0; }
+.semantic-viewport { background-color: #f6f8f6; }
+.semantic-edges { overflow: visible; }
+.semantic-node {
+  position: absolute; display: grid; align-content: center; gap: 2px; text-align: left; padding: 5px 9px;
+  border: 1px solid #c4d0c8; border-radius: 7px; background: var(--surface); color: var(--ink);
+  box-shadow: 0 1px 3px #25382a12; cursor: grab;
+}
+.semantic-node small { font-size: 10px; color: var(--subtle); }
+.semantic-node span { font-size: 12px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.semantic-node[data-concept="Material"], .semantic-node[data-concept="MaterialState"] { background: #eef4f0; }
+.semantic-node[data-concept="Capability"] { background: #eef2f7; }
+.semantic-node[data-concept="Constraint"] { background: #f8f4eb; }
+.semantic-node[data-center="true"] { border-color: #72917d; }
+.semantic-node:hover, .semantic-node[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.semantic-viewport[data-dragging="true"] .semantic-node { cursor: grabbing; }
+.semantic-unresolved { border-style: dashed; cursor: default; }
+.semantic-edge { cursor: pointer; color: #587565; outline: none; }
+.semantic-edge-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; }
+.semantic-edge-stroke { stroke: currentColor; stroke-width: 1.5; fill: none; pointer-events: none; }
+.semantic-edge[data-status="pending"], .semantic-edge[data-status="unprocessed"], .semantic-edge[data-status="mixed"] { color: #746228; }
+.semantic-edge:is([data-status="pending"], [data-status="unprocessed"], [data-status="mixed"]) .semantic-edge-stroke { stroke-dasharray: 4 3; }
+.semantic-edge[data-problem="conflict"] { color: var(--warning); }
+.semantic-edge[data-problem="invalid"] { color: var(--error); }
+.semantic-edge[data-problem="invalid"] .semantic-edge-stroke { stroke-width: 2; }
+.semantic-edge:is(:hover, :focus-visible, [aria-pressed="true"]) .semantic-edge-stroke { stroke-width: 2.8; }
+.semantic-edge-label {
+  fill: currentColor; stroke: #f6f8f6; stroke-width: 4; stroke-linejoin: round; paint-order: stroke;
+  font-size: 11px; font-weight: 650;
+}
+.semantic-edge-label tspan { font-size: 9px; }
+.semantic-edge-label[data-visible="false"] { visibility: hidden; }
+.semantic-edge:is(:hover, :focus-visible) .semantic-edge-label { visibility: visible; }
+.semantic-graph-empty {
+  position: absolute; bottom: 12px; right: 12px; max-width: calc(100% - 70px); font-size: 11px; color: var(--subtle);
+  border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 5px 8px; pointer-events: none;
+}
+.semantic-detail-actions { flex: none; padding: 1px 12px 5px; font-size: 11px; }
+.semantic-bundle-list { display: grid; align-content: start; gap: 5px; }
+.semantic-issue-list { display: grid; gap: 8px; max-height: 56vh; overflow: auto; padding-right: 4px; }
+.semantic-issue-list article, .semantic-issue-reasons > div { display: grid; gap: 5px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; }
+.semantic-issue-list p, .semantic-issue-reasons p { margin: 0; overflow-wrap: anywhere; }
+.semantic-issue-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.semantic-fact-filter { width: 100%; margin-bottom: 8px; }
+@container (min-width: 720px) {
+  .semantic-layout[data-detail="true"] { grid-template: minmax(0, 1fr) / minmax(0, 1fr) min(37%, 320px); }
+}
+@container (min-width: 880px) {
+  .semantic-layout:not([data-mode="list"]) { grid-template-columns: 205px minmax(0, 1fr); }
+  .semantic-layout:not([data-mode="list"])[data-detail="true"] { grid-template-columns: 205px minmax(0, 1fr) min(31%, 308px); }
+  .semantic-layout:not([data-mode="list"]) .semantic-directory { display: flex; }
 }

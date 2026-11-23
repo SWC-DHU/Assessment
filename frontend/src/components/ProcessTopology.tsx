@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Empty, Select } from "antd";
 import { ArrowUpToLine, Maximize, Minus, Plus, RotateCcw } from "lucide-react";
 import type { SemanticModel } from "../types";
-import { relationLabel } from "./SemanticGraph";
+import { relationLabel } from "./semanticPresentation";
 import { layoutTopology, topologyCard, topologyPath } from "./topologyLayout";
 import { useTopologyViewport } from "./useTopologyViewport";
 import type { Point } from "./useTopologyViewport";

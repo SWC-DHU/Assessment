@@ -138,6 +138,75 @@ def verify_topology_canvas(page, screenshots):
     assert positions() == expected_positions
 
 
+def verify_semantic_workspace(page, screenshots, compact=False):
+    page.get_by_role("tab", name="语义模型").click()
+    page.get_by_role("button", name="实体列表", exact=True).click()
+    directory = page.get_by_role("complementary", name="语义实体列表")
+    search = directory.get_by_role("textbox", name="搜索实体")
+    search.fill("FEED")
+    directory.get_by_label("实体类型", exact=True).select_option("capabilities")
+    directory.get_by_label("实体校验状态").select_option("verified")
+    feed_row = directory.get_by_role("button", name="电芯供料")
+    feed_row.click()
+    detail = page.get_by_role("complementary", name="语义详情")
+    expect(detail.get_by_role("heading", name="电芯供料", exact=True)).to_be_visible()
+    page.get_by_role("button", name="查看关系", exact=True).click()
+
+    graph = page.get_by_role("region", name="语义关系图")
+    center = graph.locator("[data-center=true]")
+    operation = graph.locator('[data-entity="operation:01"]')
+    relation = graph.get_by_role("button", name="需要能力 → 电芯供料")
+    expect(center).to_have_text("制造能力电芯供料")
+    expect(operation).to_be_in_viewport(ratio=0.95)
+    expect(relation).to_have_attribute("data-status", "verified")
+    expect(relation.locator(".semantic-edge-stroke")).to_have_css("stroke-dasharray", "none")
+    assert graph.locator("button[data-entity]").count() == 2
+    if compact:
+        assert detail.bounding_box()["y"] >= graph.bounding_box()["y"] + graph.bounding_box()["height"]
+        assert graph.bounding_box()["width"] == detail.bounding_box()["width"]
+
+    relation.locator("text").click()
+    expect(detail.get_by_role("heading", name="需要能力 → 电芯供料")).to_be_visible()
+    detail.get_by_role("tab", name="原文证据").click()
+    expect(detail.get_by_text("Sheet1 / C2", exact=True)).to_be_visible()
+    expect(center).to_be_in_viewport(ratio=0.95)
+    if screenshots:
+        page.screenshot(path=screenshots / ("semantics-mobile.png" if compact else "semantics-evidence.png"))
+
+    if not compact:
+        detail.get_by_role("button", name="收起关系详情").click()
+        graph_box = graph.bounding_box()
+        world = graph.locator(".semantic-world")
+        start = world.get_attribute("style")
+        page.mouse.move(graph_box["x"] + 58, graph_box["y"] + 54)
+        page.mouse.wheel(0, 35)
+        expect(world).not_to_have_attribute("style", start)
+        page.get_by_role("button", name="回到焦点").click()
+        node_box = operation.bounding_box()
+        path_before = relation.locator(".semantic-edge-stroke").get_attribute("d")
+        x, y = node_box["x"] + node_box["width"] / 2, node_box["y"] + node_box["height"] / 2
+        page.mouse.move(x, y)
+        page.mouse.down()
+        page.mouse.move(x + 27, y + 13, steps=5)
+        page.mouse.up()
+        expect(relation.locator(".semantic-edge-stroke")).not_to_have_attribute("d", path_before)
+        expect(detail).to_be_hidden()
+        operation.click()
+        detail.get_by_role("button", name="以此为中心").click()
+        expect(center).to_have_attribute("data-entity", "operation:01")
+        page.get_by_role("button", name="返回上一个焦点").click()
+        expect(center).to_have_text("制造能力电芯供料")
+        page.get_by_role("button", name="全图", exact=True).click()
+        assert graph.locator("button[data-entity]").count() > 2
+        page.get_by_role("button", name="返回焦点", exact=True).click()
+        expect(center).to_have_text("制造能力电芯供料")
+
+    page.get_by_role("button", name="实体列表", exact=True).click()
+    expect(feed_row).to_have_attribute("aria-pressed", "true")
+    expect(search).to_have_value("FEED")
+    assert page.locator(".result-body").evaluate("el => el.scrollWidth === el.clientWidth && el.scrollTop === 0")
+
+
 def verify_cancel(browser, base_url):
     entered = Event()
 
@@ -217,8 +286,7 @@ with sync_playwright() as pw:
     page.get_by_placeholder("搜索类、关系或属性").fill("directlyPrecedes")
     expect(page.get_by_text("directlyPrecedes", exact=True)).to_be_visible()
     page.keyboard.press("Escape")
-    page.get_by_role("button", name="关系图").click()
-    expect(page.get_by_role("region", name="语义关系图")).to_be_visible()
+    verify_semantic_workspace(page, args.screenshots)
     page.get_by_role("tab", name="结构化数据").click()
     with page.expect_download() as download:
         page.get_by_role("button", name="JSON", exact=True).click()
@@ -291,6 +359,7 @@ with sync_playwright() as pw:
                 page.screenshot(path=args.screenshots / "topology-mobile.png")
             detail.get_by_role("button", name="收起节点详情").click()
             expect(detail).to_be_hidden()
+            verify_semantic_workspace(page, args.screenshots, compact=True)
             page.get_by_role("button", name="素材与会话", exact=True).click()
             expect(page.get_by_role("textbox", name="搜索历史会话")).to_be_visible()
             page.get_by_role("button", name="需求对话", exact=True).click()
