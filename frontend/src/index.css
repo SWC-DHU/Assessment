@@ -299,6 +299,46 @@ button:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus
 .graph-node[aria-pressed="true"] { border: 2px solid var(--accent); background: #e2eee5; }
 .graph-node small { color: var(--subtle); font-size: 10px; }
 .graph-node span { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.result-body[data-view="topology"] { display: flex; flex-direction: column; overflow-x: hidden; }
+.topology-stack, .topology-graph { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.topology-stack { gap: 12px; }
+.topology-workspace {
+  flex: 1; min-height: 260px; min-width: 0; position: relative; display: grid; gap: 12px;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+.topology-workspace[data-detail="true"] { grid-template-columns: minmax(0, 1fr) minmax(0, min(36%, 300px)); }
+.topology-viewport {
+  position: relative; overflow: clip; min-width: 0; border: 1px solid var(--line); border-radius: 8px;
+  background: radial-gradient(#dce5de 1px, transparent 1px) 0 0 / 16px 16px, var(--paper);
+  cursor: grab; user-select: none; touch-action: none;
+}
+.topology-world { position: absolute; top: 0; left: 0; transform-origin: top left; }
+.topology-world > svg { position: absolute; top: 0; left: 0; overflow: visible; }
+.topology-viewport .graph-node { cursor: grab; }
+.topology-viewport[data-dragging="true"], .topology-viewport[data-dragging="true"] .graph-node { cursor: grabbing; }
+.graph-zoom .graph-fit { display: inline-flex; gap: 5px; width: auto; padding: 0 7px; margin-left: 4px; font-size: 11px; }
+.topology-detail {
+  display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+}
+.topology-detail-header {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 10px;
+  border-bottom: 1px solid var(--line); color: var(--subtle); font-size: 11px; font-weight: 600;
+}
+.topology-detail-header button {
+  display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--ink);
+}
+.topology-detail-header button:hover { background: var(--accent-faint); }
+.topology-detail-body { overflow: auto; overscroll-behavior: contain; }
+.topology-detail-body .entity-detail { border: 0; }
+@container (max-width: 580px) {
+  .topology-workspace[data-detail="true"] { grid-template-columns: minmax(0, 1fr); }
+  .topology-detail {
+    position: absolute; inset: 0 0 0 auto; z-index: 1; width: min(82%, 300px);
+    box-shadow: -4px 0 16px #26332c18;
+  }
+}
 .relation-list summary, .run-stages summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; cursor: pointer; }
 .relation-list details[open] summary { margin-bottom: 8px; }
 .run-stages { list-style: none; padding: 0; margin: 0; display: grid; gap: 0; }
