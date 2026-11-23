@@ -19,6 +19,12 @@ const keyboardPan: Partial<Record<string, Point>> = {
   ArrowUp: { x: 0, y: 48 }, ArrowDown: { x: 0, y: -48 },
 };
 
+export function wheelPixels(delta: number, mode: number, pageSize: number) {
+  if (mode === WheelEvent.DOM_DELTA_PAGE) return delta * pageSize;
+  if (mode === WheelEvent.DOM_DELTA_LINE) return delta * 16;
+  return delta;
+}
+
 export function useTopologyViewport(enabled: boolean, onMove?: (id: string, point: Point) => void) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
@@ -37,10 +43,9 @@ export function useTopologyViewport(enabled: boolean, onMove?: (id: string, poin
       if (drag.current) return;
       const horizontal = event.deltaX || (event.shiftKey ? event.deltaY : 0);
       const vertical = event.shiftKey ? 0 : event.deltaY;
-      const xUnit = event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? viewport.clientWidth :
-        event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
-      const yUnit = event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? viewport.clientHeight : xUnit;
-      setCamera((view) => ({ ...view, x: view.x - horizontal * xUnit, y: view.y - vertical * yUnit }));
+      const dx = wheelPixels(horizontal, event.deltaMode, viewport.clientWidth);
+      const dy = wheelPixels(vertical, event.deltaMode, viewport.clientHeight);
+      setCamera((view) => ({ ...view, x: view.x - dx, y: view.y - dy }));
     };
 
     viewport.addEventListener("wheel", onWheel, { passive: false });
@@ -136,23 +141,31 @@ export function useTopologyViewport(enabled: boolean, onMove?: (id: string, poin
     if (!drag.current) setCamera((view) => ({ ...view, x: view.x + delta.x, y: view.y + delta.y }));
   };
 
-  const reveal = (point: Point, nodeWidth: number, nodeHeight: number) => {
+  const frameNode = useCallback((point: Point, nodeWidth: number, nodeHeight: number, mode: "start" | "locate" | "reveal") => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const { clientWidth: width, clientHeight: height } = viewport;
+    if (!width || !height) return;
     setCamera((view) => {
-      const x = view.x + point.x * view.zoom;
-      const y = view.y + point.y * view.zoom;
-      const right = x + nodeWidth * view.zoom;
-      const bottom = y + nodeHeight * view.zoom;
-      if (x >= 0 && y >= 0 && right <= width && bottom <= height) return view;
-      return {
-        ...view,
-        x: (width - (2 * point.x + nodeWidth) * view.zoom) / 2,
-        y: (height - (2 * point.y + nodeHeight) * view.zoom) / 2,
+      if (mode !== "reveal") {
+        const zoom = mode === "start" ? 1 : Math.max(view.zoom, 0.85);
+        return {
+          zoom,
+          x: width / 2 - (point.x + nodeWidth / 2) * zoom,
+          y: mode === "start" ? 24 - point.y * zoom : height / 2 - (point.y + nodeHeight / 2) * zoom,
+        };
+      }
+      const shiftToShow = (offset: number, size: number, limit: number) => {
+        const padding = 12;
+        if (size + padding * 2 > limit) return (limit - size) / 2 - offset;
+        if (offset < padding) return padding - offset;
+        return Math.min(0, limit - padding - size - offset);
       };
+      const dx = shiftToShow(view.x + point.x * view.zoom, nodeWidth * view.zoom, width);
+      const dy = shiftToShow(view.y + point.y * view.zoom, nodeHeight * view.zoom, height);
+      return dx || dy ? { ...view, x: view.x + dx, y: view.y + dy } : view;
     });
-  };
+  }, []);
 
-  return { viewportRef, camera, movingNode, dragging, ignorePointerClick, fit, zoomBy, resetZoom, begin, move, finish, panWithKeys, reveal };
+  return { viewportRef, camera, movingNode, dragging, ignorePointerClick, fit, zoomBy, resetZoom, begin, move, finish, panWithKeys, frameNode };
 }

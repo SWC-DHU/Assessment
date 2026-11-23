@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Alert, Button, Empty, Select } from "antd";
-import { ArrowDownToLine, Braces, Copy, Expand, FlaskConical, GitBranch, Layers3, LayoutGrid, Sheet, Terminal } from "lucide-react";
+import { ArrowDownToLine, Braces, Copy, Expand, FlaskConical, GitBranch, Layers3, LayoutGrid, Sheet, Terminal, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
@@ -9,8 +10,10 @@ import type {
 } from "../types";
 import { semanticFrom } from "../types";
 import { HtmlPreview } from "./HtmlPreview";
+import { ProcessTopology } from "./ProcessTopology";
 import { groups, relationLabel, SemanticGraph } from "./SemanticGraph";
 import { OntologyBrowser, ReviewDialog, RunProgress, toolNames } from "./RequirementTools";
+import { wheelPixels } from "./useTopologyViewport";
 import type { Point } from "./useTopologyViewport";
 
 const tabs = [
@@ -95,8 +98,51 @@ function Citations({ model, items, onSource }: {
   </div>;
 }
 
-function EntityDetail({ model, selected, onSelect, onSource }: {
-  model: SemanticModel; selected: SemanticEntity; onSelect: (id: string) => void; onSource: (id: string) => void;
+function TopologyDetailTabs({ overview, evidence, facts }: { overview: ReactNode; evidence: ReactNode; facts: ReactNode }) {
+  const [active, setActive] = useState(0);
+  const id = useId();
+  const content = useRef<HTMLDivElement>(null);
+  const sections = [
+    { label: "工序概况", body: overview }, { label: "原文证据", body: evidence },
+    { label: "关联事实", body: facts || <p className="muted">当前节点没有关联事实。</p> },
+  ];
+  const activate = (index: number) => {
+    if (index === active) return;
+    if (content.current) content.current.scrollTop = 0;
+    setActive(index);
+  };
+  useEffect(() => {
+    const pane = content.current;
+    if (!pane) return;
+    // Keep wheel scrolling on this pane when the detail docks after a viewport resize.
+    const scrollDetails = (event: WheelEvent) => {
+      if (!event.deltaY || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      event.preventDefault();
+      pane.scrollTop += wheelPixels(event.deltaY, event.deltaMode, pane.clientHeight);
+    };
+    pane.addEventListener("wheel", scrollDetails, { passive: false });
+    return () => pane.removeEventListener("wheel", scrollDetails);
+  }, []);
+  return <>
+    <div className="topology-detail-tabs" role="tablist" aria-label="节点详情内容">
+      {sections.map(({ label }, index) => <button key={label} id={`${id}-${index}`} type="button" role="tab"
+        aria-selected={index === active} aria-controls={`${id}-content`} tabIndex={index === active ? 0 : -1}
+        onClick={() => activate(index)} onKeyDown={(event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === "Home" ? 0 : event.key === "End" ? sections.length - 1 :
+            (index + (event.key === "ArrowRight" ? 1 : sections.length - 1)) % sections.length;
+          activate(next);
+          document.getElementById(`${id}-${next}`)?.focus();
+        }}>{label}</button>)}
+    </div>
+    <div className="topology-detail-section" role="tabpanel" tabIndex={0} ref={content}
+      id={`${id}-content`} aria-labelledby={`${id}-${active}`}>{sections[active].body}</div>
+  </>;
+}
+
+function EntityDetail({ model, selected, onSelect, onSource, onClose }: {
+  model: SemanticModel; selected: SemanticEntity; onSelect: (id: string) => void; onSource: (id: string) => void; onClose?: () => void;
 }) {
   const lookup = new Map(groups.flatMap(([key]) => model[key]).map((entity) => [entity.id, entity]));
   const relations = model.relations.filter((edge) => edge.source_id === selected.id || edge.target_id === selected.id);
@@ -113,32 +159,42 @@ function EntityDetail({ model, selected, onSelect, onSource }: {
     ["上下限", selected.lower != null || selected.upper != null ? `${selected.lower ?? "—"} – ${selected.upper ?? "—"}` : null],
     ["单位", selected.unit], ["计量基准", selected.basis], ["约束说明", selected.description],
   ].filter(([, value]) => value != null && value !== "");
-  return <article className="entity-detail">
-    <header><div><small>{selected.concept}</small><h3>{[selected.number, selected.name].filter(Boolean).join(" · ")}</h3></div>
-      <div className="result-actions"><ReviewPill state={selected.status} />{selected.review === "confirmed" && <ReviewPill state="confirmed" />}</div></header>
-    <dl className="fact-grid">
-      {fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
-    </dl>
-    <h4>原文证据</h4>
+  const overview = <dl className="fact-grid">
+    {fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+  </dl>;
+  const evidence = <>
     <Citations model={model} items={[...selected.evidence, ...(selected.equipment_evidence ?? [])]} onSource={onSource} />
     {!!selected.review_evidence?.length && <><h4>人工审核依据</h4><Citations model={model} items={selected.review_evidence} onSource={onSource} /></>}
-    {relations.length > 0 && <><h4>关联事实</h4><div className="relation-list">
-      {relations.map((edge) => {
-        const otherId = edge.source_id === selected.id ? edge.target_id : edge.source_id;
-        const other = lookup.get(otherId);
-        return <details key={edge.id}>
-          <summary><span>{edge.source_id === selected.id ? "→" : "←"} {relationLabel(edge)} · {other?.name ?? (otherId === "line" ? "整线" : otherId)}</span>
-            <ReviewPill state={edge.status} /></summary>
-          {other && <button className="text-action" type="button" onClick={() => onSelect(other.id)}>查看 {other.name}</button>}
-          {edge.asserted_as === "inferred" && <p className="muted">候选推断 · 待人工确认</p>}
-          {edge.quantity && <p>组成数量 {edge.quantity.value} {edge.quantity.unit} {edge.quantity.basis && `· ${edge.quantity.basis}`}</p>}
-          {edge.review === "confirmed" && <ReviewPill state="confirmed" />}
-          {edge.condition && <p>{edge.condition}</p>}
-          {edge.max_iterations != null && <p>返工上限 {edge.max_iterations} 次</p>}
-          <Citations model={model} items={[...edge.evidence, ...(edge.review_evidence ?? [])]} onSource={onSource} />
-        </details>;
-      })}
-    </div></>}
+  </>;
+  const facts = relations.length ? <div className="relation-list">
+    {relations.map((edge) => {
+      const otherId = edge.source_id === selected.id ? edge.target_id : edge.source_id;
+      const other = lookup.get(otherId);
+      return <details key={edge.id}>
+        <summary><span>{edge.source_id === selected.id ? "→" : "←"} {relationLabel(edge)} · {other?.name ?? (otherId === "line" ? "整线" : otherId)}</span>
+          <ReviewPill state={edge.status} /></summary>
+        {other && <button className="text-action" type="button" onClick={() => onSelect(other.id)}>查看 {other.name}</button>}
+        {edge.asserted_as === "inferred" && <p className="muted">候选推断 · 待人工确认</p>}
+        {edge.quantity && <p>组成数量 {edge.quantity.value} {edge.quantity.unit} {edge.quantity.basis && `· ${edge.quantity.basis}`}</p>}
+        {edge.review === "confirmed" && <ReviewPill state="confirmed" />}
+        {edge.condition && <p>{edge.condition}</p>}
+        {edge.max_iterations != null && <p>返工上限 {edge.max_iterations} 次</p>}
+        <Citations model={model} items={[...edge.evidence, ...(edge.review_evidence ?? [])]} onSource={onSource} />
+      </details>;
+    })}
+  </div> : null;
+  return <article className={onClose ? "entity-detail topology-entity-detail" : "entity-detail"}>
+    <header>
+      <div>{!onClose && <small>{selected.concept}</small>}<h3>{[selected.number, selected.name].filter(Boolean).join(" · ")}</h3></div>
+      <div className="result-actions"><ReviewPill state={selected.status} />{selected.review === "confirmed" && <ReviewPill state="confirmed" />}</div>
+      {onClose && <button type="button" className="topology-detail-close" aria-label="收起节点详情" title="收起节点详情" onClick={onClose}>
+        <X size={16} aria-hidden="true" />
+      </button>}
+    </header>
+    {onClose ? <TopologyDetailTabs overview={overview} evidence={evidence} facts={facts} /> : <>
+      {overview}<h4>原文证据</h4>{evidence}
+      {facts && <><h4>关联事实</h4>{facts}</>}
+    </>}
   </article>;
 }
 
@@ -241,7 +297,7 @@ function Preview({ value, model, onSource }: {
 }
 
 export function RightPanel(props: RightPanelProps) {
-  const model = semanticFrom(props.extractedJson);
+  const model = useMemo(() => semanticFrom(props.extractedJson), [props.extractedJson]);
   const [ontologyOpen, setOntologyOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [group, setGroup] = useState<SemanticGroup>("operations");
@@ -273,8 +329,7 @@ export function RightPanel(props: RightPanelProps) {
   const canProject = !model && Boolean(props.debugMessage?.extracted_json);
   const status: ReviewState | undefined = verification?.status ?? model?.validation.status;
   const issues = verification?.issues ?? model?.validation.issues ?? [];
-  const showDetail = selected && model && <EntityDetail model={model} selected={selected}
-    onSelect={props.tab === "topology" ? setTopologySelection : select} onSource={props.onOpenSource} />;
+  const showDetail = selected && model && <EntityDetail model={model} selected={selected} onSelect={select} onSource={props.onOpenSource} />;
 
   return <section className="result-panel" aria-label="结构化结果工作区">
     <header className="result-header">
@@ -340,19 +395,17 @@ export function RightPanel(props: RightPanelProps) {
             catch (err) { setDiagnostic(String(err)); }
           }}>导出图 JSON</Button></div>
         {diagnostic && <Alert type="error" title={diagnostic} />}
-        <SemanticGraph key={model.run_id} model={model} selected={topologySelection} onSelect={setTopologySelection}
-          topology={{
-            positions: topologyPositions.get(model.run_id) ?? emptyTopologyPositions,
-            onMove: (id, point) => setTopologyPositions((previous) => {
-              const updated = new Map(previous);
-              const positions = new Map(previous.get(model.run_id));
-              positions.set(id, point);
-              updated.set(model.run_id, positions);
-              return updated;
-            }),
-            detail: showDetail,
-            onCloseDetail: () => setTopologySelection(null),
-          }} />
+        <ProcessTopology key={model.run_id} model={model} selected={topologySelection} onSelect={setTopologySelection}
+          positions={topologyPositions.get(model.run_id) ?? emptyTopologyPositions}
+          onMove={(id, point) => setTopologyPositions((previous) => {
+            const updated = new Map(previous);
+            const positions = new Map(previous.get(model.run_id));
+            positions.set(id, point);
+            updated.set(model.run_id, positions);
+            return updated;
+          })}
+          renderDetail={selected ? (close) => <EntityDetail key={selected.id} model={model} selected={selected}
+            onSelect={setTopologySelection} onSource={props.onOpenSource} onClose={close} /> : undefined} />
       </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有语义版本可用于绘制拓扑" />)}
       {props.tab === "semantics" && (model ? <div className="result-stack">
         <div className="result-heading"><h3>领域语义</h3><div className="result-actions">

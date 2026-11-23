@@ -5,67 +5,123 @@ from threading import Event, Thread
 from time import sleep
 from playwright.sync_api import sync_playwright, expect
 
-def verify_topology_canvas(page):
+def verify_topology_canvas(page, screenshots):
     viewport = page.get_by_role("region", name="工艺拓扑画布")
-    first = viewport.get_by_role("button", name="01 · 主线工序 电芯上料")
-    first.click()
+    nodes = viewport.get_by_role("button")
+    body = page.locator(".result-body")
+    outer_scroll = body.evaluate("element => [element.scrollLeft, element.scrollTop]")
     detail = page.get_by_role("complementary", name="拓扑节点详情")
-    expect(detail.get_by_role("heading", name="原文证据")).to_be_visible()
+
+    def card(number):
+        return viewport.locator(f'[data-operation="operation:{number}"]')
+
+    def paths():
+        return viewport.locator("svg path[marker-end]").evaluate_all("items => items.map(item => item.getAttribute('d'))")
+
+    def position(item):
+        return item.evaluate("element => [element.offsetLeft, element.offsetTop]")
+
+    def wheel_to(item):
+        bounds = viewport.bounding_box()
+        target = item.bounding_box()
+        center_y = bounds["y"] + bounds["height"] / 2
+        page.mouse.move(bounds["x"] + 12, center_y)
+        page.mouse.wheel(0, round(target["y"] + target["height"] / 2 - center_y))
+        expect(item).to_be_in_viewport(ratio=0.99)
+        page.wait_for_function("([node, center]) => Math.abs(node.getBoundingClientRect().y + node.offsetHeight / 2 - center) <= 1",
+                               arg=[item.element_handle(), center_y])
+
+    expect(detail).to_be_hidden()
+    first = position(card("01"))
+    for number in ("01", "02", "03", "04"):
+        expect(card(number)).to_be_in_viewport(ratio=0.99)
+        x, y = position(card(number))
+        assert x == first[0] and y == first[1] + (int(number) - 1) * (position(card("02"))[1] - first[1])
+    assert position(card("Z1"))[1] == position(card("04"))[1]
+    assert position(card("Z1"))[0] < first[0]
+    side_positions = [position(card(number)) for number in ("Z2", "Z3")]
+    assert all(y == position(card("07"))[1] for _, y in side_positions)
+    assert side_positions[0][0] < first[0] < side_positions[1][0]
+    for side, target in (("Z1", "05"), ("Z2", "08"), ("Z3", "08")):
+        edge = viewport.locator(f'path[data-source="operation:{side}"][data-target="operation:{target}"]')
+        assert " C " in edge.get_attribute("d")
+    if screenshots:
+        page.screenshot(path=screenshots / "topology-start.png")
+
+    wheel_to(card("08"))
+    for number in ("Z2", "Z3", "05"):
+        expect(card(number)).to_be_in_viewport(ratio=0.95)
+    merge_y = card("08").bounding_box()["y"]
+    card("08").click()
+    expect(detail.get_by_role("heading", name="08 · 模组堆叠总装")).to_be_visible()
+    expect(card("08")).to_be_in_viewport(ratio=0.99)
+    assert abs(card("08").bounding_box()["y"] - merge_y) < 2
+    assert detail.bounding_box()["x"] >= viewport.bounding_box()["x"] + viewport.bounding_box()["width"]
+    detail.get_by_role("tab", name="原文证据").click()
+    expect(detail.get_by_role("button", name="工艺需求文件.xlsx").first).to_be_visible()
+    if screenshots:
+        page.screenshot(path=screenshots / "topology-evidence.png")
+    detail.get_by_role("tab", name="关联事实").click()
+    expect(detail.locator("summary").first).to_be_visible()
     detail.get_by_role("button", name="收起节点详情").click()
     expect(detail).to_be_hidden()
+
+    search = page.get_by_role("combobox", name="搜索工序")
+    search.fill("05")
+    page.get_by_text("05 · 单体装配", exact=True).click()
+    expect(card("05")).to_have_attribute("data-located", "true")
+    for number in ("04", "05", "06", "Z1"):
+        expect(card(number)).to_be_in_viewport(ratio=0.95)
+    assert nodes.count() == 16
+    page.get_by_role("button", name="回到起点").click()
+    expect(card("01")).to_be_in_viewport(ratio=0.99)
 
     page.get_by_role("button", name="放大").click()
     expect(page.get_by_text("120%", exact=True)).to_be_visible()
     bounds = viewport.bounding_box()
-    body = page.locator(".result-body")
-    outer_scroll = body.evaluate("element => [element.scrollLeft, element.scrollTop]")
     assert body.evaluate("element => element.scrollWidth === element.clientWidth")
 
     world = viewport.locator(".topology-world")
     def camera():
         return world.evaluate("element => { const m = new DOMMatrix(element.style.transform); return [m.e, m.f]; }")
 
+    def expect_horizontal_offset(offset):
+        page.wait_for_function("x => Math.abs(new DOMMatrix(document.querySelector('.topology-world').style.transform).e - x) < 0.1",
+                               arg=offset)
+
     x, y = camera()
-    background = (bounds["x"] + 25, bounds["y"] + bounds["height"] - 25)
+    background = (bounds["x"] + 25, bounds["y"] + 45)
     page.mouse.move(*background)
     page.mouse.down()
     page.mouse.move(background[0] + 60, background[1] - 30, steps=5)
     page.mouse.up()
-    assert camera() == [x + 60, y - 30]
+    panned = camera()
+    assert all(abs(actual - expected) < 0.1 for actual, expected in zip(panned, [x + 60, y - 30])), panned
 
     page.keyboard.down("Shift")
     page.mouse.wheel(0, 120)
     page.keyboard.up("Shift")
-    page.wait_for_function("x => new DOMMatrix(document.querySelector('.topology-world').style.transform).e === x", arg=x - 60)
-    later = viewport.get_by_role("button", name="单体装配")
-    center_x = bounds["x"] + bounds["width"] / 2
-    later_box = later.bounding_box()
-    page.mouse.wheel(round(later_box["x"] + later_box["width"] / 2 - center_x), 0)
-    expect(later).to_be_in_viewport(ratio=0.75)
+    expect_horizontal_offset(x - 60)
+    page.mouse.wheel(-60, 0)
+    expect_horizontal_offset(x)
     assert body.evaluate("element => [element.scrollLeft, element.scrollTop]") == outer_scroll
 
-    node = viewport.get_by_role("button", name="贴胶")
+    node = card("03")
+    expect(node).to_be_in_viewport(ratio=0.99)
     node_box = node.bounding_box()
-    page.mouse.wheel(round(node_box["x"] + node_box["width"] / 2 - center_x), 0)
-    expect(node).to_be_in_viewport(ratio=0.9)
-    node_box = node.bounding_box()
-    nodes = viewport.get_by_role("button")
     def positions():
         return nodes.evaluate_all("items => items.map(item => [item.title, item.offsetLeft, item.offsetTop])")
-
-    def paths():
-        return viewport.locator("svg path[marker-end]").evaluate_all("items => items.map(item => item.getAttribute('d'))")
 
     original_positions, original_paths = positions(), paths()
     start_x, start_y = node_box["x"] + node_box["width"] / 2, node_box["y"] + node_box["height"] / 2
     page.mouse.move(start_x, start_y)
     page.mouse.down()
-    page.mouse.move(start_x + 36, start_y + 72, steps=6)
+    page.mouse.move(start_x + 36, start_y + 48, steps=6)
     during_drag = paths()
     assert 0 < sum(before != after for before, after in zip(original_paths, during_drag)) < len(original_paths)
     page.mouse.up()
     assert paths() == during_drag
-    expected_positions = [[name, left + 30, top + 60] if name == "贴胶" else [name, left, top]
+    expected_positions = [[name, left + 30, top + 40] if name == "贴胶" else [name, left, top]
                           for name, left, top in original_positions]
     assert positions() == expected_positions
     expect(detail).to_be_hidden()
@@ -150,7 +206,7 @@ with sync_playwright() as pw:
     if args.screenshots:
         page.screenshot(path=args.screenshots / "desktop.png")
     page.get_by_role("tab", name="工艺拓扑").click()
-    verify_topology_canvas(page)
+    verify_topology_canvas(page, args.screenshots)
     with page.expect_download() as graph_export:
         page.get_by_role("button", name="导出图 JSON").click()
     assert graph_export.value.suggested_filename.startswith("process-graph-")
@@ -213,10 +269,26 @@ with sync_playwright() as pw:
             page.get_by_role("tab", name="工艺拓扑").click()
             canvas = page.get_by_role("region", name="工艺拓扑画布")
             canvas_width = canvas.bounding_box()["width"]
-            canvas.get_by_role("button").first.click()
+            first = canvas.get_by_role("button").first
+            first.click()
             detail = page.get_by_role("complementary", name="拓扑节点详情")
             expect(detail).to_be_in_viewport(ratio=0.99)
+            expect(first).to_be_in_viewport(ratio=0.99)
             assert canvas.bounding_box()["width"] == canvas_width
+            assert detail.bounding_box()["y"] > canvas.bounding_box()["y"] + canvas.bounding_box()["height"]
+            detail.get_by_role("tab", name="原文证据").click()
+            expect(detail.get_by_role("button", name="工艺需求文件.xlsx").first).to_be_visible()
+            detail.get_by_role("tab", name="关联事实").click()
+            facts = detail.get_by_role("tabpanel", name="关联事实")
+            header = detail.get_by_role("heading").first.bounding_box()
+            camera = canvas.locator(".topology-world").get_attribute("style")
+            facts.hover()
+            page.mouse.wheel(0, 280)
+            page.wait_for_function("element => element.scrollTop > 0", arg=facts.element_handle(), timeout=3000)
+            assert detail.get_by_role("heading").first.bounding_box() == header
+            assert canvas.locator(".topology-world").get_attribute("style") == camera
+            if args.screenshots:
+                page.screenshot(path=args.screenshots / "topology-mobile.png")
             detail.get_by_role("button", name="收起节点详情").click()
             expect(detail).to_be_hidden()
             page.get_by_role("button", name="素材与会话", exact=True).click()
