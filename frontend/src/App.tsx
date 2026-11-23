@@ -24,7 +24,6 @@ import type {
   TestSessionSummary,
   UploadedFile,
 } from "./types";
-import { semanticFrom } from "./types";
 
 export default function App() {
   const { message: antdMessage } = AntdApp.useApp();
@@ -258,11 +257,11 @@ export default function App() {
       setStage("parsing");
       const uploaded = await api.uploadFiles(activeSession.id, files);
       const detail = await api.getSession(activeSession.id);
-      setActiveSession(detail);
+      setActiveSession((current) => current?.id === detail.id ? detail : current);
       setStage("idle");
       const failures = uploaded.filter((file) => file.parse_status === "error").length;
       if (failures) antdMessage.warning(`上传 ${uploaded.length} 份文件，${failures} 份解析失败`);
-      else antdMessage.success(`已上传并解析 ${uploaded.length} 份文件`);
+      else antdMessage.success(`已加入 ${uploaded.length} 份可解析资料`);
       return uploaded;
     } catch (err) {
       setStage("idle");
@@ -470,7 +469,7 @@ export default function App() {
     setArea("results");
   };
 
-  const handleExport = async (format: "xlsx" | "docx" | "md" | "json") => {
+  const handleExport = async (format: "xlsx" | "docx" | "md") => {
     if (!activeSession || !visibleData || !activeTemplateId) return;
     try {
       const prefix =
@@ -479,7 +478,7 @@ export default function App() {
         "process_output";
       await api.exportTemplate(
         activeTemplateId,
-        format === "json" ? { ...(semanticFrom(visibleData) ?? visibleData) } : visibleData,
+        visibleData,
         format,
         prefix
       );
@@ -584,7 +583,8 @@ export default function App() {
           <LeftSidebar sessions={sessions} activeSessionId={activeSession?.id || null} files={activeSession?.files || []}
             onCreateSession={() => { if (!isRunning) void handleCreateSession(); }} onSelectSession={handleSelectSession}
             onDeleteSession={handleDeleteSession} onPreviewFile={setPreviewFile} onDeleteFile={handleDeleteFile}
-            onReparseFile={handleReparse} />
+            onReparseFile={handleReparse} uploadDisabled={!activeSession || isRunning || stage === "parsing"}
+            onUpload={() => { setArea("chat"); document.getElementById("workbench-upload")?.click(); }} />
         </aside>
         <div className="chat-area">
           <ChatWorkbench ready={!!activeSession} key={activeSession?.id} messages={activeSession?.messages || []} files={activeSession?.files || []}
@@ -593,7 +593,7 @@ export default function App() {
             onPreviewFile={setPreviewFile} onSendMessage={handleSendMessage} onAbortRun={handleAbortRun}
             onRerunMessage={handleRerunMessage} onClearSession={handleClearSession}
             onSelectDebugMessage={(id) => { setSelectedDebugMessageId(id); openResults("debug"); }}
-            selectedDebugMessageId={selectedDebugMessageId} onOpenAgentManager={() => setAgentModalOpen(true)}
+            onOpenAgentManager={() => setAgentModalOpen(true)}
             onOpenResult={(id) => { void handleInspect(id); openResults("overview"); }}
             revisionBase={revisionBase} onClearRevision={() => setRevisionBase(undefined)}
             strategy={strategy} onStrategy={setStrategy} />

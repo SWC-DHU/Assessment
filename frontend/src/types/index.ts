@@ -227,7 +227,7 @@ export interface EnvStatus {
 }
 
 export type ReviewState = "verified" | "pending" | "conflict" | "invalid" | "unprocessed";
-export type SemanticGroup = "products" | "operations" | "materials" | "material_states" | "capabilities" | "constraints";
+export type SemanticGroup = "products" | "operations" | "materials" | "material_states" | "capabilities" | "constraints" | "objectives";
 
 export interface Evidence {
   document_id: string;
@@ -275,6 +275,7 @@ export interface SemanticEntity {
   raw_names?: string[];
   equipment_requirement?: string | null;
   equipment_evidence?: Evidence[];
+  information_flows?: { name: string; direction: "input" | "output"; status: ReviewState; evidence: Evidence[] }[];
   code?: string | null;
   mapping?: string;
   candidates?: string[];
@@ -285,6 +286,7 @@ export interface SemanticEntity {
   material_type?: string | null;
   target_id?: string | null;
   parameter_code?: string | null;
+  related_parameter_codes?: string[];
   comparator?: string | null;
   value?: number | null;
   lower?: number | null;
@@ -292,6 +294,8 @@ export interface SemanticEntity {
   unit?: string | null;
   basis?: string | null;
   description?: string | null;
+  constraint_type?: string | null;
+  strength?: string | null;
 }
 
 export interface SemanticRelation {
@@ -316,7 +320,7 @@ export interface SemanticIssue {
   status: ReviewState;
 }
 
-export interface SemanticModel extends Record<SemanticGroup, SemanticEntity[]> {
+export interface SemanticModel extends Record<Exclude<SemanticGroup, "objectives">, SemanticEntity[]> {
   schema_version: string;
   ontology_version: string;
   vocabulary_version: string;
@@ -325,7 +329,9 @@ export interface SemanticModel extends Record<SemanticGroup, SemanticEntity[]> {
   content_digest: string;
   input_digest: string;
   metadata?: { extraction_status: ExtractionStatus; batches: ExtractionBatch[] } | null;
-  modeling_intents?: { id: string; kind: string; description: string; evidence: Evidence[] }[];
+  modeling_intents?: (Pick<SemanticEntity, "id" | "evidence" | "review" | "review_evidence"> & {
+    kind: string; description: string; status?: ReviewState;
+  })[];
   process_graph?: ProcessGraph | null;
   source_refs: { document_id: string; name: string; kind: string }[];
   relations: SemanticRelation[];
@@ -369,7 +375,7 @@ export interface ExtractionBatch {
 }
 export interface QuantitySpecification { value: number; unit: string; basis?: string }
 export interface ProcessGraph {
-  nodes: { id: string; number?: string | null; name: string; category: string }[];
+  nodes: { id: string; number?: string | null; name: string; category: string; layer?: number | null }[];
   edges: { id: string; source: string; target: string; kind: string; direct: boolean;
     condition?: string | null; max_iterations?: number | null; status: ReviewState;
     evidence: Evidence[]; relation_ids: string[] }[];
@@ -383,6 +389,9 @@ export interface OntologyCatalog {
   classes: OntologyTerm[];
   object_properties: OntologyTerm[];
   data_properties: OntologyTerm[];
+  core_concepts?: string[];
+  core_relations?: string[];
+  instance_concepts?: Record<string, string>;
   vocabulary: { capabilities: Record<string, string[]> };
 }
 export type ReviewRequest = { note: string } & (

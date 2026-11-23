@@ -159,13 +159,14 @@ def revalidate(session_id: str, version_id: str, db: Session = Depends(get_db)):
     docs = [doc for doc in docs if doc.ref.content_sha256 == originals[doc.ref.document_id]]
     for group in (*COLLECTIONS, "relations", "modeling_intents"):
         for fact in getattr(semantic, group):
-            for cite in [*fact.evidence, *getattr(fact, "equipment_evidence", []), *fact.review_evidence]:
+            flow_evidence = [cite for flow in getattr(fact, "information_flows", []) for cite in flow.evidence]
+            for cite in [*fact.evidence, *getattr(fact, "equipment_evidence", []), *fact.review_evidence, *flow_evidence]:
                 located = locate(docs, cite.quote, cite.extraction_batch,
                                  document_id=cite.document_id, fragment_id=cite.fragment_id)
                 cite.status = "verified" if located and located[0].location == cite.location else "pending"
     preserved = [issue for issue in semantic.validation.issues if issue.code in {
         "field_conflict", "identity_conflict", "candidate_shape", "candidate_schema", "file_parse_error",
-        "empty_extraction", "revision_pending", "revision_target_unresolved", "evidence_not_located",
+        "empty_extraction", "revision_pending", "revision_target_unresolved", "evidence_not_located", "measurement_unparsed",
     }]
     preserved.extend(issue for issue in semantic.validation.issues if issue.code.startswith("batch_"))
     result = validate_model(semantic, preserved)

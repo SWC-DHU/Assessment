@@ -1,6 +1,8 @@
 """Project typed process flow from grounded semantic relations."""
 from collections import defaultdict
 
+import networkx as nx
+
 from .schema import GraphEdge, GraphNode, Issue, ProcessGraph, RequirementSemanticModel
 
 # Whether to reverse the ontology direction, edge kind, and explicitly direct route.
@@ -23,6 +25,15 @@ CATEGORIES = {
     "可选工序": "optional", "可选": "optional", "optional": "optional",
 }
 
+UNCONDITIONAL = {"declared_predecessor", "direct_transition", "branch", "merge"}
+CANONICAL_KIND = {"merge": 0, "branch": 1, "direct_transition": 2, "declared_predecessor": 3}
+
+
+def flow_endpoints(relation):
+    if FLOW[relation.type][0]:
+        return relation.target_id, relation.source_id
+    return relation.source_id, relation.target_id
+
 
 def build_process_graph(model: RequirementSemanticModel) -> ProcessGraph:
     nodes = [
@@ -35,59 +46,68 @@ def build_process_graph(model: RequirementSemanticModel) -> ProcessGraph:
         )
         for op in model.operations
     ]
-    ids = {node.id for node in nodes}
-    edges = []
+    by_id = {node.id: node for node in nodes}
+    grouped = defaultdict(list)
     issues = []
 
     def issue(code, message, path, status="pending"):
         issues.append(Issue(code=code, message=message, path=path, status=status))
 
-    merges = {(edge.source_id, edge.target_id): edge for edge in model.relations if edge.type == "mergesInto"}
-    seen = set()
     for relation in model.relations:
         if relation.type not in FLOW:
             continue
-        reverse, kind, direct = FLOW[relation.type]
-        source, target = (relation.target_id, relation.source_id) if reverse else (relation.source_id, relation.target_id)
-        if not {source, target} <= ids or source == target:
+        _, kind, direct = FLOW[relation.type]
+        source, target = flow_endpoints(relation)
+        if source not in by_id or target not in by_id or source == target:
             issue("graph_endpoint", "工艺边存在无效端点或自连接", relation.id, "invalid")
             continue
-        linked_merge = merges.get((source, target)) if relation.type == "hasPredecessor" else None
-        if linked_merge and linked_merge.status == relation.status:
-            continue  # The merge edge will carry both references below.
-        key = (source, target, kind, relation.condition)
-        if key in seen:
-            issue("graph_duplicate", "同一工艺连接存在多个定义", relation.id, "conflict")
-        seen.add(key)
-        references = [relation.id]
-        if relation.type == "mergesInto":
-            references.extend(edge.id for edge in model.relations if edge.type == "hasPredecessor"
-                              and edge.target_id == source and edge.source_id == target and edge.status == relation.status)
         status = relation.status
         if not any(item.status == "verified" for item in relation.evidence) and status == "verified":
             status = "pending"
-        edges.append(GraphEdge(
+        evidence = list(relation.evidence)
+        if kind in UNCONDITIONAL and by_id[target].category == "merge":
+            kind = "merge"
+            evidence.extend(cite for cite in by_id[target].evidence
+                            if CATEGORIES.get(cite.quote.strip().lower()) == "merge" and cite.status == "verified")
+        key = (source, target, "direct" if kind in UNCONDITIONAL else kind, relation.condition,
+               relation.max_iterations, status)
+        grouped[key].append(GraphEdge(
             id=relation.id, source=source, target=target, kind=kind, direct=direct,
             condition=relation.condition, max_iterations=relation.max_iterations, status=status,
-            evidence=relation.evidence, relation_ids=references,
+            evidence=evidence, relation_ids=[relation.id],
         ))
 
-    incoming = defaultdict(set)
-    connected = set()
+    edges = []
+    for parallel in grouped.values():
+        edge = min(parallel, key=lambda item: CANONICAL_KIND.get(item.kind, 0))
+        citations = {(cite.document_id, cite.fragment_id, cite.quote): cite
+                     for candidate in parallel for cite in candidate.evidence}
+        edge.evidence = list(citations.values())
+        edge.relation_ids = [candidate.id for candidate in parallel]
+        edges.append(edge)
+
+    direct_graph = nx.DiGraph()
+    direct_graph.add_nodes_from(by_id)
+    direct_graph.add_edges_from((edge.source, edge.target) for edge in edges
+                                if edge.status == "verified" and edge.direct and edge.kind != "rework")
+    if nx.is_directed_acyclic_graph(direct_graph):
+        for layer, generation in enumerate(nx.topological_generations(direct_graph)):
+            for node_id in generation:
+                by_id[node_id].layer = layer
+    route_graph = nx.DiGraph()
+    route_graph.add_nodes_from(by_id)
+    route_graph.add_edges_from((edge.source, edge.target) for edge in edges if edge.status == "verified")
     outgoing_conditions = defaultdict(list)
     for edge in edges:
         if edge.status != "verified":
             continue
-        connected.update((edge.source, edge.target))
-        if edge.direct and edge.kind != "rework":
-            incoming[edge.target].add(edge.source)
         if edge.kind in {"conditional", "rework", "branch"} and edge.condition:
             outgoing_conditions[edge.source].append(edge.condition)
     materials = {item.id: item.name for item in [*model.materials, *model.material_states]}
     for node in nodes:
-        if len(nodes) > 1 and node.id not in connected:
+        if len(nodes) > 1 and route_graph.degree(node.id) == 0:
             issue("graph_isolated", "缺少已校验的工艺连接", node.id)
-        if node.category == "merge" and len(incoming[node.id]) < 2:
+        if node.category == "merge" and direct_graph.in_degree(node.id) < 2:
             issue("merge_predecessors_pending", "汇合工序缺少至少两个明确的直接前驱", node.id)
         outputs = [materials.get(key, "") for key in node.output_material_ids + node.output_state_ids]
         if any("不合格" in name for name in outputs) and not any(

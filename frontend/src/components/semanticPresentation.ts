@@ -1,8 +1,8 @@
-import type { SemanticEntity, SemanticModel, SemanticRelation } from "../types";
+import type { SemanticEntity, SemanticGroup, SemanticModel, SemanticRelation } from "../types";
 
 export const groups = [
   ["products", "产品"], ["operations", "工序"], ["materials", "物料"],
-  ["material_states", "物料状态"], ["capabilities", "制造能力"], ["constraints", "约束"],
+  ["capabilities", "制造能力"], ["constraints", "约束"], ["objectives", "目标"], ["material_states", "物料状态"],
 ] as const;
 
 const labels: Record<string, string> = {
@@ -20,7 +20,7 @@ export function relationLabel(edge: Pick<SemanticRelation, "type">) {
 
 const conceptLabels: Record<string, string> = {
   Product: "产品", Operation: "工序", Material: "物料", MaterialState: "物料状态",
-  Capability: "制造能力", Constraint: "约束", ProductionLine: "整线",
+  Capability: "制造能力", CapabilityRequirement: "制造能力", Constraint: "约束", Objective: "目标", ProductionLine: "整线",
 };
 
 export function conceptLabel(concept: string) {
@@ -31,8 +31,14 @@ export function entityTitle(entity: SemanticEntity) {
   return [entity.number, entity.name].filter(Boolean).join(" · ");
 }
 
+export function entitiesInGroup(model: SemanticModel, group: SemanticGroup): SemanticEntity[] {
+  return group === "objectives" ? (model.modeling_intents ?? []).map((item) => ({
+    ...item, name: item.description, concept: "Objective", status: item.status ?? "unprocessed",
+  })) : model[group];
+}
+
 export function semanticEntities(model: SemanticModel) {
-  const entities = new Map(groups.flatMap(([group]) => model[group]).map((entity) => [entity.id, entity]));
+  const entities = new Map(groups.flatMap(([group]) => entitiesInGroup(model, group)).map((entity) => [entity.id, entity]));
   if (!entities.has("line") && (model.relations.some((edge) => edge.target_id === "line" || edge.source_id === "line") ||
     model.constraints.some((constraint) => constraint.target_id === "line"))) {
     entities.set("line", { id: "line", name: "整线", concept: "ProductionLine", status: "unprocessed",

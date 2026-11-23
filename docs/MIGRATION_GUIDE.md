@@ -1,6 +1,6 @@
 # 后续迁移到 Metatwin
 
-迁移单位是 `backend/domain_semantics`。其运行时依赖为 Pydantic 2、RDFLib 和 PyYAML。Turtle、YAML 和文本 Prompt 随 Python 包分发。Assessment 的 FastAPI、SQLite、OpenAI SDK 配置和 React 工作台属于集成层。
+迁移单位是 `backend/domain_semantics`。其运行时依赖为 Pydantic 2、RDFLib、PyYAML 和 NetworkX。Turtle、YAML 和文本 Prompt 随 Python 包分发。Assessment 的 FastAPI、SQLite、OpenAI SDK 配置和 React 工作台属于集成层。
 
 ## 接口
 
@@ -31,3 +31,5 @@ round_trip = SemanticModel.model_validate(model_json)
 ## v2 迁移接口
 
 外部服务可从领域包直接导入 `RequirementSemanticModel` 和 `query_ontology`。将 `process_graph` 作为工艺拓扑交付数据，并保留语义关系和来源索引供后续资源匹配查询。消费方可据 `metadata.extraction_status` 暂缓自动建模，针对缺失的流转条件向用户发起澄清。采用 v1 时仍可用 `query_ontology(version="1.0.0")` 读取该版本的契约。
+
+Schema 2.1 继续使用 `capabilities`、`modeling_intents` 和 `process_graph`。匹配服务可读取能力的 `code`、各工序的 `capability_ids` 及其关系证据，按校验状态决定是否匹配。读取物料状态时通过 `material_id` 找到基础物料；工序信息流独立位于 `information_flows`。旧版模型仍可用 `RequirementSemanticModel.model_validate()` 读取。

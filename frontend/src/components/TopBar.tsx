@@ -1,4 +1,4 @@
-import { Button, Select, Tooltip } from "antd";
+import { Button, Dropdown, Select, Tooltip } from "antd";
 import { Blocks, PanelLeft, PanelRight, Settings2, Sheet } from "lucide-react";
 import type { AgentConnectionTestResponse, AgentProfile } from "../types";
 
@@ -43,8 +43,10 @@ export function TopBar(props: TopBarProps) {
       </Tooltip>
     </div>
     <nav className="header-actions" aria-label="工作台设置">
-      <Tooltip title="智能体配置"><Button type="text" aria-label="智能体配置" icon={<Settings2 size={17} />} onClick={props.onOpenAgentManager}><span>智能体</span></Button></Tooltip>
-      <Tooltip title="模板管理"><Button type="text" aria-label="模板管理" icon={<Sheet size={17} />} onClick={props.onOpenTemplateStudio}><span>模板管理</span></Button></Tooltip>
+      <Dropdown trigger={["click"]} menu={{ items: [
+        { key: "agent", label: "智能体配置", icon: <Settings2 size={15} />, onClick: props.onOpenAgentManager },
+        { key: "templates", label: "模板管理", icon: <Sheet size={15} />, onClick: props.onOpenTemplateStudio },
+      ] }}><Button type="text" aria-label="高级设置" icon={<Settings2 size={17} />}><span>设置</span></Button></Dropdown>
       <div className="desktop-toggles">
         <Tooltip title={props.leftCollapsed ? "展开素材" : "折叠素材"}><Button type="text" aria-label="切换素材侧栏"
           aria-pressed={!props.leftCollapsed} icon={<PanelLeft size={16} />} onClick={props.onToggleLeft} /></Tooltip>

@@ -1,31 +1,22 @@
 # 领域语义契约
 
-| 层 | 实现 | 内容 |
+| 层 | 实现 | 职责 |
 | --- | --- | --- |
-| 本体 | `domain_semantics/ontology/*.ttl`，RDFLib | RDF/OWL 类、关系端点、不同时间参数对应的约束类型 |
-| 词表 | `domain_semantics/vocabulary/manufacturing.yaml`，PyYAML | 概念别名、受控制造能力、参数词和单位 |
-| Schema | `schema.py`，Pydantic 2 | 五类实体、可重用的关系实例、证据、来源、版本和验证问题 |
-| 候选 | `candidates.py` | 模型提出的事实与引文，核验结果由后端生成 |
-| 校验 | `validation.py` | 引用类型、直接依赖环、条件与返工限制、数值及单位、来源冲突 |
-| 投影 | `projection.py` | 语义字段与旧模板字段的只读输出上下文 |
+| 静态本体 | `backend/domain_semantics/ontology` | 六个核心类 Product、Material、Operation、CapabilityRequirement、Constraint、Objective，辅助类 MaterialState、ProductionLine，并定义关系允许的端点 |
+| 受控词表 | `backend/domain_semantics/vocabulary/manufacturing.yaml` | 工序和能力的别名、物料状态规则、信息流分类、参数与单位 |
+| 动态实例 | `pipeline.py`、`validation.py`、`process_graph.py` | Pydantic 实例化、逐字证据核验、OWL 端点检查、数量和量纲冲突校验、NetworkX 拓扑 |
+| 交换契约 | `schema.py`、`projection.py` | 规范 JSON、引用和版本、模板兼容投影 |
 
-Schema、本体、词表和 Prompt 当前均为 `2.0.0`。本体命名空间为 `https://assessment.example.org/ontology/manufacturing#`。业务检查由 Python 执行。本体保留 OWL 的关系语义供迁移或图查询使用。
+本体和词表为 3.0.0，交换 Schema 为 2.1.0。既有 `capabilities[].concept` 的 `Capability` 判别值在后端映射到 `CapabilityRequirement`。目标继续通过 `modeling_intents` 发布。1.0.0 和 2.0.0 的存档本体与 JSON 可读取。基于旧版本生成子版本时，程序归并能力别名，并迁移仅作为已核验工序输入输出的已知信息项。历史快照保留原语义内容。
 
-## 关系与方向
+## 事实与拓扑
 
-- `hasPredecessor` 从当前工序指向直接前驱。工艺拓扑将其箭头转换成执行顺序。
-- `branchesTo`、`mergesInto`、`conditionallyPrecedes` 和 `reworksTo` 使用工艺流向。明确的汇合类型加直接前驱可生成汇合关系。并行控制需要原文直接说明。
-- `consumes` 和 `produces` 从工序指向物料，`requiresCapability` 从工序指向能力，`hasComponent` 从产品指向产品或物料。
-- `appliesTo` 从约束指向产品、工序、能力或 `line`。返工边独立于直接依赖环检查。
+- 核心关系覆盖产品组成、直接前驱、物料输入输出、制造能力和约束对象。OWL 保留明确声明的业务依赖、先后、条件、旁路和返工端点。表达不合格产出时，缺少明确下一工序会产生待确认。
+- `hasPredecessor` 在语义模型中从当前工序指向前驱。拓扑按执行方向输出，合并同一直接流转的等价边，保留构成该边的关系 ID 与证据。由前驱和工序类型共同确定的汇合只在拓扑表达。NetworkX 联合检查先后和业务依赖形成的环，返工仍单独检查条件与次数。
+- 按标准编码聚合制造能力。例如“供料”“上料”“电芯供料”归入 FEED。实例保留所有原始描述和引文，各工序的能力关系保留自己的来源。
+- `material_states[].material_id` 指向基础物料，输入输出关系仍能追溯原始状态词。识别信息、标识信息和检测报告等保存在 `operations[].information_flows`，保留方向与原始证据。
+- 数值约束使用 `target_id`、`parameter_code`、`comparator`、`value` 或上下限、`unit` 和可选计量基准 `basis`。整线节拍示例为 `line / takt_time / <= / 120 / s / 模组`。定性要求可使用一个参数编码或记录多个相关参数，保留原文。规则无法核定量化表达时，保存原文并报告待确认。
 
-## 证据、映射与未知值
+## 证据与执行
 
-证据包含文档 ID、片段 ID、逐字引文、位置和批次。工作表引用带 Sheet、行及单元格，文本文档带行或段落，PDF 带页与行，用户输入带消息 ID。起止偏移相对于片段。语义摘要基于内容，排除时间、运行和来源的随机标识，同时保留可比的输入 SHA-256。
-
-决定性的表格证据来自单元格及其表头。词表使用标准名、编码、同义词和能力列中的明确别名片段。多个候选时可以调用现有 Provider 作有限选项判断。未知能力保留原词及来源。当候选的具体设备无法逐字核验时，要求保留空值。当前实体只表达需求阶段的设备描述。
-
-工时、等待、缓存和节拍独立编码。示例 `整线生产节拍≤120秒/模组` 表达为 `target_id="line"`、`parameter_code="takt_time"`、`comparator="<="`、`value=120`、`unit="s"`、`basis="模组"`。约束数值仅在受支持的范围和量纲内核验，显式空值和零值分开保存。
-
-状态包括已核验、待确认、来源冲突、校验不通过及未处理。逐字匹配验证引用的存在。语义检查进一步核对对象、比较方向和关系端点。自然语言识别采用保守规则，定向工时修订、明确表格列和所支持的运算符拥有较强的确定性。跨段推理、OCR 和更复杂的工程单位留作后续扩展。
-
-新版图、批次、关系边界及人工状态见 [REFACTOR_V2.md](REFACTOR_V2.md)。
+证据包含文件或消息 ID、原文片段、工作表与单元格或文段位置以及提取方法。确定性规则处理已识别表列和明确文本表达。LLM 按批接收剩余片段，输出带引文的候选。程序复用已处理且内容一致的来源，部分失败时保留已核验事实及已成功的批次。兼容导出和历史版本通过原有接口访问。

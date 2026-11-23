@@ -39,7 +39,7 @@ def test_workbook_revision_template_export_and_restore(api):
     url = f"/api/sessions/{session['id']}"
     versions = f"/api/semantics/sessions/{session['id']}/versions"
     catalog = api.get("/api/semantics/catalog").json()
-    assert catalog["ontology_version"] == "2.0.0"
+    assert catalog["ontology_version"] == "3.0.0"
     good, bad = api.post(f"{url}/files", files=[
         ("files", ("工艺需求文件.xlsx", paths[0].read_bytes())), ("files", ("损坏.xlsx", b"not an xlsx")),
     ]).json()
@@ -183,7 +183,9 @@ def test_human_review_creates_traceable_version_and_preserves_original(api):
     assert not api.get(f"{versions}/{base['run_id']}").json()["process_graph"]["edges"]
     assert api.get(sess).json()["current_extracted_json"]["semantic"]["run_id"] == child["run_id"]
     assert api.get("/api/semantics/catalog?version=1.0.0").json()["ontology_version"] == "1.0.0"
-    assert len(api.get("/api/semantics/tools").json()) == 9
+    assert {"parse_document", "deterministic_extraction", "build_process_graph", "validate_constraints"} <= {
+        item["id"] for item in api.get("/api/semantics/tools").json()
+    }
 
 
 def test_partial_result_is_saved_with_unprocessed_scope(api):
@@ -203,3 +205,15 @@ def test_partial_result_is_saved_with_unprocessed_scope(api):
     steps = {step["stage"] for step in result["assistant_message"]["debug_info"]["tool_trace"]}
     assert {"query_ontology", "build_process_graph", "validate_constraints", "export_requirement_model"} <= steps
     assert api.get(url).json()["current_extracted_json"]["semantic"]["run_id"] == semantic["run_id"]
+
+
+def test_upload_reuses_identical_name_and_content_but_keeps_distinct_revisions(api):
+    session = api.post("/api/sessions", json={}).json()
+    session_url = f"/api/sessions/{session['id']}"
+    original = ("files", ("parts.csv", b"operation id,operation name\n01,Inspect"))
+    changed = ("files", ("parts.csv", b"operation id,operation name\n01,Assemble"))
+    first, = api.post(f"{session_url}/files", files=[original, original]).json()
+    repeated, revision = api.post(f"{session_url}/files", files=[original, changed]).json()
+    assert repeated["id"] == first["id"]
+    assert revision["id"] != first["id"]
+    assert len(api.get(session_url).json()["files"]) == 2

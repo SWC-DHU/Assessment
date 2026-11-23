@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Empty, Select } from "antd";
-import { ArrowDownToLine, Braces, Copy, Expand, FlaskConical, GitBranch, Layers3, LayoutGrid, Sheet, Terminal } from "lucide-react";
+import { Alert, Button, Dropdown, Empty, Select } from "antd";
+import { ArrowDownToLine, Braces, CircleAlert, Copy, Ellipsis, Expand, FlaskConical, GitBranch, Layers3, LayoutGrid, Sheet, Terminal } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
@@ -10,8 +10,8 @@ import type {
 import { semanticFrom } from "../types";
 import { HtmlPreview } from "./HtmlPreview";
 import { ProcessTopology } from "./ProcessTopology";
-import { groups } from "./semanticPresentation";
-import { Citations, EntityDetail, ReviewPill, statusLabels } from "./SemanticDetails";
+import { entitiesInGroup, entityTitle, relationTitle, semanticEntities } from "./semanticPresentation";
+import { Citations, EntityDetail, evidenceLocation, ReviewPill, statusLabels } from "./SemanticDetails";
 import { SemanticWorkspace } from "./SemanticWorkspace";
 import type { EntityGroup } from "./SemanticWorkspace";
 import { OntologyBrowser, ReviewDialog, RunProgress, toolNames } from "./RequirementTools";
@@ -22,10 +22,13 @@ const tabs = [
   { id: "topology", name: "工艺拓扑", icon: GitBranch },
   { id: "semantics", name: "语义模型", icon: Layers3 },
   { id: "json", name: "结构化数据", icon: Braces },
+  { id: "issues", name: "校验问题", icon: CircleAlert },
+] as const;
+const secondaryViews = [
   { id: "preview", name: "模板预览", icon: Sheet },
   { id: "debug", name: "Debug", icon: Terminal },
 ] as const;
-export type ResultTab = (typeof tabs)[number]["id"];
+export type ResultTab = (typeof tabs)[number]["id"] | (typeof secondaryViews)[number]["id"];
 const emptyTopologyPositions: ReadonlyMap<string, Point> = new Map();
 
 const stageLabels: Record<string, string> = {
@@ -43,7 +46,7 @@ interface RightPanelProps {
   extractedJson: Record<string, unknown> | null;
   templatePreview: TemplatePreviewResponse | null;
   onApplyJsonEdit: (data: Record<string, unknown>) => Promise<void>;
-  onExport: (format: "xlsx" | "docx" | "md" | "json") => void;
+  onExport: (format: "xlsx" | "docx" | "md") => void;
   debugMessage: ChatMessage | null;
   tab: ResultTab;
   onTab: (tab: ResultTab) => void;
@@ -66,6 +69,13 @@ function saveJson(value: unknown, filename: string) {
   link.download = filename;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function constraintValue(item: SemanticModel["constraints"][number]) {
+  const bounds = item.comparator === "range" ? [item.lower, item.upper].join("–") : item.value;
+  if (bounds == null) return item.description ?? item.name;
+  const sign = item.comparator === "range" ? null : item.comparator?.replace("<=", "≤").replace(">=", "≥");
+  return [sign, bounds, item.unit, item.basis ? `/ ${item.basis}` : null].filter((part) => part != null).join(" ");
 }
 
 function CopyButton({ value }: { value: string }) {
@@ -130,7 +140,7 @@ function Preview({ value, model, onSource }: {
   if (!value) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择模板并生成结果后查看填充" />;
   if (value.error) return <Alert type="error" showIcon title={value.error} />;
   const entity = model && row != null
-    ? groups.flatMap(([key]) => model[key]).find((item) => item.id === value.row_ids?.[row]) : null;
+    ? semanticEntities(model).get(value.row_ids?.[row] ?? "") : null;
   return <div className="result-stack">
     {!!value.mapping_issues?.length && <Alert type="warning" showIcon title="部分映射需检查"
       description={value.mapping_issues.join(" · ")} />}
@@ -157,12 +167,72 @@ function Preview({ value, model, onSource }: {
   </div>;
 }
 
+const issueTips: Record<string, string> = {
+  conditional_route_missing: "补充异常产出的下一工序、转序条件和来源。",
+  merge_predecessors_pending: "在工艺资料中列出参与汇合的各直接前驱。",
+  graph_isolated: "核对该工序是否独立，或补充其明确的前置依赖。",
+  capability_unmapped: "核对原始能力描述，在人工审核中选择受控编码。",
+  constraint_conflict: "核对各来源的适用范围、单位和版本，确认采用的边界。",
+  measurement_unparsed: "补充清晰的参数名称、比较符、数值及单位。",
+  component_quantity_conflict: "核对产品组成与计量基准，再提交准确的组件数量。",
+  relation_reference: "核对工序、物料或能力是否已定义，并检查关系两端的类型。",
+  source_not_found: "恢复缺失的原始资料并重新核验。",
+};
+const issueStates = ["invalid", "conflict", "pending", "unprocessed"] as const;
+const batchReasons: Record<string, string> = {
+  offline: "离线运行已跳过剩余自然语言",
+  unconfigured: "模型连接尚未配置",
+  review_required: "需要先明确修订对象",
+  request_budget_exhausted: "本轮模型调用预算已用完",
+  output_truncated: "模型响应达到长度限制",
+  semantic_evidence_pending: "部分候选缺少可核验的原文依据",
+  service_unavailable: "模型服务暂不可用",
+};
+
+function IssuesView({ model, issues, onLocate, onSource }: {
+  model: SemanticModel | null; issues: SemanticModel["validation"]["issues"];
+  onLocate: (id: string) => void; onSource: (id: string) => void;
+}) {
+  const [filter, setFilter] = useState("");
+  const entities = model ? semanticEntities(model) : new Map();
+  const relations = new Map(model?.relations.map((edge) => [edge.id, edge]));
+  const visible = (filter ? issues.filter((issue) => issue.status === filter) : issues)
+    .slice().sort((a, b) => issueStates.findIndex((key) => key === a.status) - issueStates.findIndex((key) => key === b.status));
+  return <div className="result-stack">
+    <div className="result-heading"><div><h3>校验问题</h3><p>{model ? `${issues.length} 项诊断 · 来自当前语义版本` : "运行解析后查看校验问题"}</p></div>
+      {!!issues.length && <Select size="small" aria-label="筛选校验问题" value={filter} onChange={setFilter}
+        options={[{ value: "", label: "全部状态" }, ...issueStates.map((state) => ({
+          value: state, label: `${statusLabels[state]} · ${issues.filter((issue) => issue.status === state).length}`,
+        }))]} />}</div>
+    {!visible.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={model ? "当前筛选下没有校验问题" : "暂无语义版本"} />}
+    <div className="validation-list">{visible.map((issue, index) => {
+      const entity = entities.get(issue.path);
+      const edge = relations.get(issue.path);
+      const batch = model?.metadata?.batches.find((item) => item.id === issue.path);
+      const evidence = edge?.evidence ?? entity?.evidence ?? [];
+      const cite = evidence[0];
+      const name = cite && model?.source_refs.find((source) => source.document_id === cite.document_id)?.name;
+      const tip = issueTips[issue.code] ?? (issue.code.startsWith("batch_")
+        ? "检查资料及模型连接，然后重跑对应解析。"
+        : "对照原文补充或确认受影响的字段，然后重新核验。");
+      return <article key={`${issue.path}-${issue.code}-${index}`}>
+        <div className="validation-item-head"><ReviewPill state={issue.status} />
+          {(entity || edge) && <button type="button" className="text-action" onClick={() => onLocate(issue.path)}>定位事实</button>}</div>
+        <strong>{edge ? relationTitle(edge, entities) : entity ? entityTitle(entity) : batch?.scope ?? issue.path}</strong>
+        {cite && <small>{[name, evidenceLocation(cite)].filter(Boolean).join(" · ")}</small>}
+        <p>{(batch?.reason && batchReasons[batch.reason]) || issue.message}</p><p className="muted">{tip}</p>
+        {model && !!evidence.length && <details><summary>原文证据</summary><Citations model={model} items={evidence} onSource={onSource} /></details>}
+      </article>;
+    })}</div>
+  </div>;
+}
+
 export function RightPanel(props: RightPanelProps) {
   const model = useMemo(() => semanticFrom(props.extractedJson), [props.extractedJson]);
   const [ontologyOpen, setOntologyOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [group, setGroup] = useState<EntityGroup>("all");
-  const [issuesOpen, setIssuesOpen] = useState(false);
+  const [locatePath, setLocatePath] = useState<string | null>(null);
   const [topologySelection, setTopologySelection] = useState<string | null>(null);
   const [topologyPositions, setTopologyPositions] = useState(() => new Map<string, ReadonlyMap<string, Point>>());
   const [edit, setEdit] = useState(false);
@@ -172,28 +242,40 @@ export function RightPanel(props: RightPanelProps) {
   const [verifying, setVerifying] = useState(false);
   const json = useMemo(() => JSON.stringify(model || props.extractedJson, null, 2), [model, props.extractedJson]);
   useEffect(() => {
-    setIssuesOpen(false); setTopologySelection(null); setEdit(false); setDiagnostic(""); setVerification(null);
+    setLocatePath(null); setTopologySelection(null); setEdit(false); setDiagnostic(""); setVerification(null);
   }, [model?.run_id, props.extractedJson]);
-  const selected = model && groups.flatMap(([key]) => model[key]).find((entity) => entity.id === topologySelection);
+  const selected = model?.operations.find((entity) => entity.id === topologySelection);
   const showVersion = !!props.versions.length;
   const canProject = !model && Boolean(props.debugMessage?.extracted_json);
   const status: ReviewState | undefined = verification?.status ?? model?.validation.status;
   const issues = verification?.issues ?? model?.validation.issues ?? [];
-  const openIssues = () => { props.onTab("semantics"); setIssuesOpen(true); };
+  const openIssues = () => props.onTab("issues");
+  const extraction = model?.metadata?.extraction_status ?? (props.debugMessage?.status === "error" ? "failed" : undefined);
+  const summaryEntities = model ? semanticEntities(model) : new Map();
+  const quantifiedComponents = model?.relations.filter((edge) => edge.type === "hasComponent" && edge.quantity) ?? [];
+  const lineLimits = model?.constraints.filter((item) => item.target_id === "line") ?? [];
+  const primaryTab = tabs.some(({ id }) => id === props.tab);
+  const locate = (id: string) => { setLocatePath(id); props.onTab("semantics"); };
 
   return <section className="result-panel" aria-label="结构化结果工作区">
     <header className="result-header">
-      <div className="result-title"><Layers3 size={17} /><h2>结果工作区</h2>{status && <button type="button" className="result-validation-button" aria-haspopup="dialog"
+      <div className="result-title"><Layers3 size={18} /><h2>解析结果</h2>{status && <button type="button" className="result-validation-button"
         aria-label={`${statusLabels[status]}，查看校验问题（${issues.length}）`} onClick={openIssues}><ReviewPill state={status} /></button>}</div>
+      <div className="result-header-actions">
       {showVersion && <Select aria-label="结果版本" size="small" virtual={false} value={model?.run_id ?? "active"}
         popupMatchSelectWidth={false} onChange={(id) => props.onVersion(id === "active" ? null : id)}
         options={[{ value: "active", label: "当前结果" }, ...props.versions.map((version) => ({
           value: version.id, label: `${new Date(version.created_at).toLocaleString("zh-CN")} · ${version.id.slice(0, 6)}`,
         }))]} />}
+      <Dropdown trigger={["click"]} menu={{ items: secondaryViews.map(({ id, name, icon: Icon }) => ({
+        key: id, label: name, icon: <Icon size={15} />,
+      })), selectedKeys: primaryTab ? [] : [props.tab], onClick: ({ key }) => props.onTab(key as ResultTab) }}>
+        <Button size="small" type="text" aria-label="更多结果视图" id="result-more" icon={<Ellipsis size={19} />} />
+      </Dropdown></div>
     </header>
     <div className="result-tabs" role="tablist" aria-label="结果视图">
       {tabs.map(({ id, name, icon: Icon }, index) => <button type="button" role="tab" id={`result-tab-${id}`}
-        aria-selected={props.tab === id} aria-controls="result-contents" tabIndex={props.tab === id ? 0 : -1}
+        aria-selected={props.tab === id} aria-controls="result-contents" tabIndex={props.tab === id || (!primaryTab && index === 0) ? 0 : -1}
         key={id} onClick={() => props.onTab(id)} onKeyDown={(event) => {
           if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
           event.preventDefault();
@@ -201,24 +283,30 @@ export function RightPanel(props: RightPanelProps) {
             (index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length;
           props.onTab(tabs[next].id);
           document.getElementById(`result-tab-${tabs[next].id}`)?.focus();
-        }}><Icon size={15} /><span>{name}</span></button>)}
+        }}><Icon size={15} /><span>{name}</span>{id === "issues" && issues.length > 0 && <small>{issues.length}</small>}</button>)}
     </div>
-    <div className="result-body" data-view={props.tab} role="tabpanel" id="result-contents" aria-labelledby={`result-tab-${props.tab}`}>
+    <div className="result-body" data-view={props.tab} role="tabpanel" id="result-contents" aria-labelledby={primaryTab ? `result-tab-${props.tab}` : "result-more"}>
       {props.tab === "overview" && (model ? <div className="result-stack">
         <div className="result-heading"><div><h3>制造需求概览</h3>
           <p>Schema {model.schema_version} · 本体 {model.ontology_version} · 词表 {model.vocabulary_version}</p></div>
         </div>
-        {model.metadata && <p className="muted">覆盖状态 <ReviewPill state={model.metadata.extraction_status} /></p>}
-        {!!model.modeling_intents?.length && <section className="intent-list"><h4>后续建模意图</h4>
-          <ul>{model.modeling_intents.map((item) => <li key={item.id}>{item.description}</li>)}</ul>
+        {extraction && <div className="result-coverage"><ReviewPill state={extraction} /><span>{model.source_refs.length} 项来源</span></div>}
+        {(quantifiedComponents.length > 0 || lineLimits.length > 0) && <section className="requirement-summary">
+          <h4>关键需求</h4>
+          {quantifiedComponents.map((edge) => <button type="button" key={edge.id} onClick={() => locate(edge.id)}>
+            <span>{summaryEntities.get(edge.source_id)?.name} · {summaryEntities.get(edge.target_id)?.name}</span>
+            <strong>{edge.quantity?.value} {edge.quantity?.unit}</strong><ReviewPill state={edge.status} /></button>)}
+          {lineLimits.map((item) => <button type="button" key={item.id} onClick={() => locate(item.id)}>
+            <span>整线 · {item.name}</span><strong>{constraintValue(item)}</strong><ReviewPill state={item.status} /></button>)}
+        </section>}
+        {!!model.modeling_intents?.length && <section className="intent-list"><h4>建模目标</h4>
+          <ul>{model.modeling_intents.map((item) => <li key={item.id}><button type="button" className="text-action" onClick={() => locate(item.id)}>{item.description}</button></li>)}</ul>
         </section>}
         <div className="semantic-stats">
-          {groups.map(([id, label]) => <button type="button" key={id} onClick={() => {
-            setGroup(id); props.onTab("semantics");
-          }}><span>{label}</span><strong>{model[id].length}</strong></button>)}
-          <button type="button" onClick={() => props.onTab("semantics")}><span>语义关系</span><strong>{model.relations.length}</strong></button>
-          <button type="button" onClick={() => document.getElementById("semantic-issues")?.scrollIntoView({ block: "nearest" })}>
-            <span>待确认与诊断</span><strong>{issues.length}</strong></button>
+          {([["operations", "工序"], ["materials", "物料"], ["capabilities", "能力"], ["constraints", "约束"]] as const)
+            .map(([id, label]) => <button type="button" key={id} onClick={() => {
+              setGroup(id); props.onTab("semantics");
+            }}><span>{label}</span><strong>{entitiesInGroup(model, id).length}</strong></button>)}
         </div>
         <div className="result-actions">
           <Button size="small" icon={<FlaskConical size={15} />} loading={verifying} onClick={async () => {
@@ -231,13 +319,9 @@ export function RightPanel(props: RightPanelProps) {
           <Button size="small" onClick={() => setReviewOpen(true)}>人工审核</Button>
         </div>
         {diagnostic && <Alert type="error" title={diagnostic} />}
-        <section id="semantic-issues" className="issue-list"><h4>待确认与诊断</h4>
-          {issues.length ? issues.map((issue, idx) => <article key={`${issue.path}-${idx}`}>
-            <ReviewPill state={issue.status} /><div><p>{issue.message}</p><code>{issue.code} · {issue.path}</code></div>
-          </article>) : <p className="muted">当前核验未发现问题。</p>}
-        </section>
       </div> : <div className="result-placeholder"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
-        description={props.extractedJson ? "当前会话包含旧版抽取结果" : "生成一次解析结果后，查看制造需求和来源"} />
+        description={props.isRunning ? "正在生成解析结果" : props.extractedJson ? "当前会话包含旧版抽取结果"
+          : extraction === "failed" ? "最近一次解析失败，请查看该轮对话" : "等待工艺解析结果"} />
         {canProject && <Button onClick={props.onProject}>从历史抽取生成语义版本</Button>}</div>)}
       {props.tab === "topology" && (model ? <div className="topology-stack">
         <div className="result-heading"><div><h3>工艺拓扑</h3><p>查看直接转序、前置依赖与条件关系</p></div>
@@ -248,6 +332,11 @@ export function RightPanel(props: RightPanelProps) {
         {diagnostic && <Alert type="error" title={diagnostic} />}
         <ProcessTopology key={model.run_id} model={model} selected={topologySelection} onSelect={setTopologySelection}
           positions={topologyPositions.get(model.run_id) ?? emptyTopologyPositions}
+          onResetLayout={() => setTopologyPositions((previous) => {
+            const updated = new Map(previous);
+            updated.delete(model.run_id);
+            return updated;
+          })}
           onMove={(id, point) => setTopologyPositions((previous) => {
             const updated = new Map(previous);
             const positions = new Map(previous.get(model.run_id));
@@ -259,13 +348,15 @@ export function RightPanel(props: RightPanelProps) {
             onSelect={setTopologySelection} onSource={props.onOpenSource} onClose={close} /> : undefined} />
       </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有语义版本可用于绘制拓扑" />)}
       {props.tab === "semantics" && (model ? <SemanticWorkspace key={model.run_id} model={model}
-        group={group} onGroup={setGroup} issues={issues} issuesOpen={issuesOpen} onCloseIssues={() => setIssuesOpen(false)}
+        group={group} onGroup={setGroup} issues={issues} locatePath={locatePath} onLocated={() => setLocatePath(null)}
         onOntology={() => setOntologyOpen(true)} onSource={props.onOpenSource} />
         : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有统一语义模型" />)}
+      {props.tab === "issues" && <IssuesView key={model?.run_id} model={model} issues={issues} onLocate={locate} onSource={props.onOpenSource} />}
       {props.tab === "json" && (props.extractedJson ? <div className="result-stack">
         <div className="result-heading"><div><h3>结构化数据</h3><p>{model ? `内容摘要 ${model.content_digest.slice(0, 16)}` : "旧版抽取 JSON"}</p></div>
           <div className="result-actions"><CopyButton value={json} />
-          <Button size="small" icon={<ArrowDownToLine size={15} />} onClick={() => props.onExport("json")}>JSON</Button>
+          <Button size="small" icon={<ArrowDownToLine size={15} />}
+            onClick={() => saveJson(model ?? props.extractedJson, model ? `requirement-${model.run_id}.json` : "requirement.json")}>JSON</Button>
           {!model && <Button size="small" onClick={() => { setDraft(json); setEdit((value) => !value); }}>编辑</Button>}</div>
         </div>
         {edit ? <><textarea aria-label="编辑抽取 JSON" className="json-code json-editor" value={draft} onChange={(event) => setDraft(event.target.value)} />

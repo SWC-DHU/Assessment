@@ -8,8 +8,9 @@ from domain_semantics.schema import Constraint, Operation
 
 def test_versioned_catalog_and_public_schema():
     metadata = ontology_metadata()
-    assert metadata["ontology_version"] == "2.0.0"
-    assert {"Product", "Material", "ProcessRelation"} <= set(metadata["concepts"])
+    assert metadata["ontology_version"] == "3.0.0"
+    assert set(metadata["core_concepts"]) == {"Product", "Material", "Operation", "CapabilityRequirement", "Constraint", "Objective"}
+    assert "ProcessRelation" in ontology_metadata("2.0.0")["concepts"]
     assert "reworksTo" in metadata["relations"]
     assert candidates("capabilities", " 精确定位 ") == ["POSITION"]
     assert candidates("parameters", "单件工时") == ["process_time"]

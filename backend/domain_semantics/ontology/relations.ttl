@@ -7,9 +7,9 @@ m:hasComponent a owl:ObjectProperty ; rdfs:domain m:Product ;
 m:hasPredecessor a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation .
 m:consumes a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Material .
 m:produces a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Material .
-m:requiresCapability a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Capability .
+m:requiresCapability a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:CapabilityRequirement .
 m:appliesTo a owl:ObjectProperty ; rdfs:domain m:Constraint ;
-    rdfs:range [ a owl:Class ; owl:unionOf (m:Product m:Operation m:Capability m:ProductionLine) ] .
+    rdfs:range [ a owl:Class ; owl:unionOf (m:Product m:Operation m:CapabilityRequirement m:ProductionLine) ] .
 m:branchesTo a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation .
 m:mergesInto a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation .
 m:reworksTo a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation .
@@ -36,6 +36,6 @@ m:produces rdfs:comment "工序到其产出的物料；跨工序转序独立表�
 m:requiresCapability rdfs:comment "工序到所需制造功能。"@zh .
 m:appliesTo rdfs:comment "约束到作用对象；对象范围应有来源。"@zh .
 m:branchesTo rdfs:comment "原文明确指定的工艺分支流向。"@zh .
-m:mergesInto rdfs:comment "由前序流向有来源证据的汇合工序。"@zh .
+m:mergesInto rdfs:comment "保留原文直接声明的汇合；前驱和工序类型共同声明的汇合由拓扑投影表达。"@zh .
 m:reworksTo rdfs:comment "原文给定的返工流向，可形成受控回路。"@zh .
 m:conditionallyPrecedes rdfs:comment "原文明示的带条件转序。"@zh .

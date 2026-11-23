@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Form, Input, InputNumber, Modal, Select, Tabs } from "antd";
 import { api } from "../api/client";
 import type { OntologyCatalog, OntologyTerm, PipelineStage, ReviewRequest, SemanticModel } from "../types";
-import { groups } from "./semanticPresentation";
+import { entitiesInGroup, groups } from "./semanticPresentation";
+import { statusLabels } from "./SemanticDetails";
 
 export const toolNames: Record<string, string> = {
   parse_document: "读取文档与定位来源", extract_facts: "分批提取事实", query_ontology: "查询本体",
@@ -10,6 +11,7 @@ export const toolNames: Record<string, string> = {
   validate_semantics: "校验语义", validate_constraints: "校验工艺约束", export_requirement_model: "生成需求模型",
   deterministic_extraction: "提取结构化事实", batch_split: "拆分截断批次", llm_repair: "局部修复",
   llm_disambiguation: "能力消歧",
+  file_parsing: "输入文件解析",
 };
 
 const stageStatus: Record<string, string> = {
@@ -24,6 +26,33 @@ export function RunProgress({ steps }: { steps: PipelineStage[] }) {
         {toolNames[step.stage] ?? step.stage}{step.batch_id ? ` ${step.batch_id}` : ""} · {stageStatus[step.status] ?? step.status}
       </span>) : <span>等待后端执行</span>}
   </div>;
+}
+
+const timelineStages = [
+  ["资料解析", ["file_parsing", "parse_document", "deterministic_extraction"]],
+  ["自然语言提取", ["extract_facts", "llm_extraction", "llm_repair", "batch_split"]],
+  ["本体查询与映射", ["query_ontology", "normalize_term", "map_semantic_entities", "llm_disambiguation"]],
+  ["工艺拓扑", ["build_process_graph"]],
+  ["约束与一致性", ["validate_constraints", "validate_semantics", "consistency"]],
+] as const;
+
+export function RunTimeline({ steps }: { steps: PipelineStage[] }) {
+  const groups = timelineStages.flatMap(([title, keys]) => {
+    const stages = steps.filter(({ stage }) => keys.some((key) => key === stage));
+    return stages.length ? [{ title, stages }] : [];
+  });
+  if (!groups.length) return null;
+  return <details className="run-timeline">
+    <summary>执行步骤 <span>{groups.length} 个阶段</span></summary>
+    <ol>{groups.map(({ title, stages }) => <li key={title}>
+      <strong>{title}</strong>
+      <ul>{stages.map((item, index) => <li key={item.stage + index}>
+        <span>{toolNames[item.stage] ?? (item.stage === "consistency" ? "一致性检查" : title)}</span>
+        <small>{stageStatus[item.status] ?? statusLabels[item.status] ?? item.status}</small>
+        {item.summary && <p>{item.summary}</p>}
+      </li>)}</ul>
+    </li>)}</ol>
+  </details>;
 }
 
 function OntologyTerms({ terms }: { terms: OntologyTerm[] }) {
@@ -54,7 +83,10 @@ export function OntologyBrowser({ version, onClose }: { version?: string; onClos
     {error && <Alert type="error" title={error} />}
     {!data && !error && <p className="muted">正在读取 RDF 本体</p>}
     {data && <Tabs items={[
-      { key: "classes", label: "概念", children: <OntologyTerms terms={find(data.classes)} /> },
+      { key: "classes", label: "核心概念", children: <OntologyTerms terms={find(data.core_concepts?.length
+        ? data.classes.filter(({ id }) => data.core_concepts?.includes(id)) : data.classes)} /> },
+      ...(data.core_concepts?.length ? [{ key: "support", label: "辅助概念", children: <OntologyTerms
+        terms={find(data.classes.filter(({ id }) => !data.core_concepts?.includes(id)))} /> }] : []),
       { key: "relations", label: "对象关系", children: <OntologyTerms terms={find(data.object_properties)} /> },
       { key: "attributes", label: "数据属性", children: <OntologyTerms terms={find(data.data_properties)} /> },
     ]} />}
@@ -88,7 +120,7 @@ export function ReviewDialog({ model, onSubmit, onClose }: {
       .catch((reason: unknown) => { if (active) setError(String(reason)); });
     return () => { active = false; };
   }, []);
-  const entities = groups.flatMap(([key]) => model[key]);
+  const entities = groups.flatMap(([key]) => entitiesInGroup(model, key));
   const options = entities.map((item) => ({ value: item.id, label: [item.number, item.name].filter(Boolean).join(" · ") }));
   const opOptions = options.filter((item) => model.operations.some((op) => op.id === item.value));
   const components = model.relations.filter((relation) => relation.type === "hasComponent");

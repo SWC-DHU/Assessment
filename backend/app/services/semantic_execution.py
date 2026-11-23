@@ -1,6 +1,7 @@
 """Orchestrate one requirement agent with bounded extraction and deterministic tools."""
 from collections import deque
 from dataclasses import replace
+from functools import lru_cache
 import json
 from pathlib import Path
 
@@ -8,21 +9,22 @@ from pydantic import ValidationError
 
 from domain_semantics.catalog import query_ontology
 from domain_semantics.candidates import ExtractionCandidates
-from domain_semantics.pipeline import Builder, CANDIDATES, candidate_errors, revision_request, table_rows
+from domain_semantics.pipeline import Builder, CANDIDATES, candidate_errors, entity_terms, revision_request, table_rows
 from domain_semantics.schema import BatchReport, SemanticModel
-from domain_semantics.sources import Document
+from domain_semantics.sources import Document, digest
 
-from .extraction_batches import ExtractionBatch, plan_batches, recovered_rows, scoped_candidates
+from .extraction_batches import ExtractionBatch, fragment_digest, plan_batches, recovered_rows, scoped_candidates
 from .llm_extractor import ExtractionResult, ExtractorConfig, FileInputContext, run_extraction
 from .redaction import safe_endpoint
 from .semantic_tools import ToolTrace
 
 PROMPTS = Path(__file__).resolve().parents[2] / "domain_semantics" / "prompts"
-PROMPT_VERSION = "2.0.0"
+PROMPT_VERSION = "2.1.0"
 MAX_BATCH_OUTPUT = 4096
 MAX_BATCH_ROWS = 24
 
 
+@lru_cache
 def prompt(name: str) -> str:
     return (PROMPTS / f"{name}.txt").read_text(encoding="utf-8").strip()
 
@@ -35,22 +37,29 @@ def candidate_context(message: Document, files: list[Document]) -> list[FileInpu
         for doc in [*files, message] if any(part.text.strip() for part in doc.fragments)]
 
 
-def schema_instruction(config: ExtractorConfig) -> str:
+@lru_cache(maxsize=1)
+def candidate_contract() -> str:
     def compact(value):
         if isinstance(value, dict):
-            return {key: compact(item) for key, item in value.items() if key not in {"title", "default"}}
+            omitted = {"title", "default", "additionalProperties", "minLength", "minItems"}
+            return {key: compact(item) for key, item in value.items() if key not in omitted}
         if isinstance(value, list):
             return [compact(item) for item in value]
         return value
 
-    schema = json.dumps(compact(ExtractionCandidates.model_json_schema()), ensure_ascii=False, separators=(",", ":"))
-    return "\n".join((prompt("extraction"), "候选 JSON Schema：" + schema, "任务配置背景：",
+    return json.dumps(compact(ExtractionCandidates.model_json_schema()), ensure_ascii=False, separators=(",", ":"))
+
+
+def schema_instruction(config: ExtractorConfig) -> str:
+    return "\n".join((prompt("extraction"), "候选 JSON Schema：" + candidate_contract(), "任务配置背景：",
                       config.system_prompt[:1200], config.business_rules[:1200]))
 
 
-def unprocessed(batch: ExtractionBatch, reason: str, status="unprocessed", rows=0) -> BatchReport:
+def unprocessed(batch: ExtractionBatch, reason: str | None, status="unprocessed", rows=0) -> BatchReport:
+    fragments = [fragment_digest(part) for part in batch.fragments]
     return BatchReport(id=batch.id, source_ids=batch.source_ids, scope=batch.scope, status=status,
-                       input_characters=batch.size, accepted_rows=rows, reason=reason)
+                       input_characters=batch.size, accepted_rows=rows, reason=reason, fragments=fragments,
+                       input_digest=digest("|".join(fragments)))
 
 
 def related_reference(batch: ExtractionBatch, builder: Builder) -> dict | None:
@@ -59,7 +68,7 @@ def related_reference(batch: ExtractionBatch, builder: Builder) -> dict | None:
     entities = [{"id": item.id, "name": item.name, "number": getattr(item, "number", None)}
                 for group in ("operations", "products", "materials", "capabilities")
                 for item in getattr(builder.model, group)
-                if item.name in text or any((cite.document_id, cite.location.sheet, cite.location.row) in rows
+                if any(term in text for term in entity_terms(item)) or any((cite.document_id, cite.location.sheet, cite.location.row) in rows
                                             for cite in item.evidence)]
     return {"known_entities": entities[:12]} if entities else None
 
@@ -155,17 +164,20 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
     catalog = trail.call("query_ontology", "读取 RDF 版本及关系端点", query_ontology)
     builder = Builder(docs, run_id, base)
     builder.model.metadata.session_id = session_id
-    known = {item.document_id: item.content_sha256 for item in base.source_refs} if base else {}
+    old_refs = {item.document_id: item.content_sha256 for item in base.source_refs} if base else {}
+    prior = base.metadata.batches if base and base.metadata else []
+    previously_processed = set(base.metadata.processed_source_ids) if base and base.metadata else set()
+    unchanged = {doc.ref.document_id for doc in docs if old_refs.get(doc.ref.document_id) == doc.ref.content_sha256}
+    completed_fragments = {fragment for report in prior if report.status == "complete" and set(report.source_ids) <= unchanged
+                           for fragment in report.fragments}
     revised = bool(base and revision_request(text))
+    needs_review = bool(base and reformat_revision(text) and not revised)
     covered = set()
     covered_text = set()
-    rows = trail.call("parse_document", f"{len(files)} 份文件的来源定位", lambda: list(table_rows(files, covered)))
-    if not revised:
-        rows = [row for row in rows if row["number"].document_id not in known or any(
-            doc.ref.document_id == row["number"].document_id and known.get(doc.ref.document_id) != doc.ref.content_sha256
-            for doc in files)]
-    else:
-        rows = []
+    source_docs = [doc for doc in docs if doc.ref.document_id not in unchanged & previously_processed]
+    pending_files = [doc for doc in source_docs if doc.ref.kind == "file"]
+    rows = trail.call("parse_document", f"定位 {len(pending_files)} 份待处理文件，复用 {len(files) - len(pending_files)} 份",
+                      lambda: [] if revised else list(table_rows(pending_files, covered)))
 
     for error in failed or []:
         builder.issue("file_parse_error", error, "source_refs")
@@ -173,18 +185,23 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
     builder.table(rows)
     if revised:
         builder.revise(message)
-    elif text.strip() and not (base and reformat_revision(text)):
-        builder.explicit_requirements(message, covered_text)
+    else:
+        for doc in source_docs:
+            if not needs_review or doc is not message:
+                builder.explicit_requirements(doc, covered_text)
+    if needs_review:
+        builder.issue("revision_pending", "请通过人工审核明确选择修订对象及字段", "operations")
+    if files and text.strip().rstrip("。！!").strip() in {"解析文件", "请解析文件", "请解析上传的工艺文件", "开始解析"}:
+        covered.update((part.document_id, part.key) for part in message.fragments)
     trail.end(initial, "success" if builder.by_id else "skipped",
               f"{len(rows)} 行表格 · {len(builder.by_id)} 项已建立或继承事实")
 
-    batch_docs = [doc for doc in docs if known.get(doc.ref.document_id) != doc.ref.content_sha256]
-    batches = [] if revised else plan_batches(batch_docs, covered, covered_text)
+    batches = [] if revised else plan_batches(source_docs, covered - builder.residual_cells, covered_text, completed_fragments)
     attempts, reports, payloads = [], [], []
     budget = config.request_budget
     request_queue = deque(batches)
     last_error = None
-    skip_reason = ("offline" if offline else "unconfigured" if not config.api_key else None)
+    skip_reason = ("review_required" if needs_review else "offline" if offline else "unconfigured" if not config.api_key else None)
     if not request_queue:
         trail.end(trail.start("extract_facts", "已识别表格或定向修订"), "skipped", "本次无须提交候选批次")
 
@@ -201,7 +218,7 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
         errors = candidate_errors(payload) if result.extracted_json is not None else result.debug_info.get("validation_errors", [])
         if result.status != "success":
             last_error = result
-            if code in {"authentication_failed", "model_access_denied", "provider_forbidden", "unconfigured"}:
+            if code in {"authentication_failed", "model_access_denied", "provider_forbidden", "unconfigured", "service_unavailable"}:
                 skip_reason = code
         cut = result.debug_info.get("finish_reason") == "length" or code == "output_truncated"
         full = count_rows(locally_valid(payload)) >= MAX_BATCH_ROWS
@@ -220,7 +237,7 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
                 continue
             reports.append(unprocessed(batch, overflow, "partial" if locally_valid(payload) else "failed", count_rows(locally_valid(payload))))
             continue
-        if errors and budget > 0 and batch.attempt == 0:
+        if errors and budget > 0 and batch.attempt == 0 and (result.extracted_json is not None or code == "invalid_json"):
             repaired = await extract_facts(config, batch, builder, trail, budget, repair={
                 "fields_to_repair": errors[:8],
                 "previous_output_excerpt": result.debug_info.get("raw_response", "")[:850],
@@ -243,15 +260,10 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
             reports.append(unprocessed(batch, code or "schema_invalid", "partial" if locally_valid(payload) else "failed", count_rows(locally_valid(payload))))
 
     published_payload, batch_scopes = scoped_candidates(payloads)
-    if payloads and base and reformat_revision(text):
-        builder.issue("revision_pending", "请通过人工审核明确选择修订对象及字段", "operations")
-    elif payloads:
+    before_mapping = len(builder.issues)
+    if payloads:
         trail.call("map_semantic_entities", f"{count_rows(published_payload)} 条候选", builder.candidates,
                    published_payload, batch_scopes)
-    if any(report.status != "complete" for report in reports):
-        for report in reports:
-            if report.status != "complete":
-                builder.issue("batch_" + report.status, f"{report.scope} · {report.reason}", report.id, "unprocessed")
     if batches and not builder.by_id:
         builder.issue("empty_extraction", "本次未生成可核验事实", "extraction")
     mapping = trail.call("normalize_term", "使用受控工序、能力及参数词表", builder.mapping_queue) if not revised else []
@@ -266,11 +278,33 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
             builder.accept_mapping(choices)
         trail.end(entry, judged.status, judged.error_message)
 
-    prior = [item.model_copy(update={"id": item.id if ":" in item.id else f"{base.run_id[:8]}:{item.id}"})
-             for item in base.metadata.batches if item.status != "complete"] if base and base.metadata else []
-    builder.model.metadata.batches = [*prior, *reports]
+    rejected = [issue.path for issue in builder.issues[before_mapping:] if issue.code in
+                {"evidence_not_located", "candidate_shape", "name_unsubstantiated", "relation_unsubstantiated",
+                 "relation_direction", "constraint_target_unsubstantiated", "precedence_direction"}]
+    for report in reports:
+        if report.status == "complete" and any(path.rsplit(".", 2)[0] == report.id for path in rejected):
+            report.status, report.reason = "partial", "semantic_evidence_pending"
+    retried = {doc.ref.document_id for doc in source_docs} if not revised else set()
+    retained = [item.model_copy(update={"id": item.id if ":" in item.id else f"{base.run_id[:8]}:{item.id}"})
+                for item in prior if item.status != "complete" and not set(item.source_ids) <= retried]
+    pending_ids = {source_id for report in reports if report.status != "complete" for source_id in report.source_ids}
+    builder.model.metadata.processed_source_ids = sorted(
+        (previously_processed - {doc.ref.document_id for doc in docs if doc.ref.document_id not in unchanged})
+        | (retried - pending_ids)
+    )
+    reused = [item.model_copy(update={"id": item.id if ":" in item.id else f"{base.run_id[:8]}:{item.id}"})
+              for item in prior if item.status == "complete" and set(item.source_ids) & pending_ids
+              and set(item.source_ids) <= unchanged]
+    builder.model.metadata.batches = [*retained, *reused, *reports]
+    for report in [*retained, *reports]:
+        if report.status != "complete":
+            builder.issue("batch_" + report.status, f"{report.scope} · {report.reason}", report.id, "unprocessed")
+    if batches and not attempts:
+        trail.end(trail.start("extract_facts", f"{len(batches)} 个剩余来源批次"), "skipped",
+                  f"{len(batches)} 个批次待处理，可在校验问题中查看原因", skip_reason)
     incomplete = bool(failed) or any(report.status != "complete" for report in builder.model.metadata.batches)
-    incomplete |= any(issue.code in {"candidate_shape", "evidence_not_located", "revision_pending", "empty_extraction"}
+    incomplete |= any(issue.code in {"candidate_shape", "evidence_not_located", "revision_pending", "revision_target_unresolved",
+                                     "revision_value_unresolved", "empty_extraction"}
                       for issue in builder.issues)
     have_facts = bool(builder.by_id)
     status = "failed" if not have_facts else "partial" if incomplete else "complete"
@@ -304,10 +338,10 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
             debug.update(error_code=skip_reason, error_message="当前模型缺少可用的 API Key")
             message_text = debug["error_message"]
         return None, ExtractionResult(status="error", error_message=message_text, debug_info=debug)
-    summary = (f"{'部分完成，已生成语义版本' if incomplete else '已生成语义版本'}。{len(model.operations)} 道工序、{len(model.relations)} 条语义关系，"
-               f"{len(model.unresolved_items)} 项诊断。")
+    summary = (f"{'部分完成，已生成语义版本' if incomplete else '已生成语义版本'}。"
+               f"{len(model.operations)} 道工序、{len(model.constraints)} 条约束，{len(model.unresolved_items)} 项校验问题。")
     if incomplete:
-        summary += " 已保留核对过的事实，可在 Debug 查看批次状态。"
+        summary += " 已保留可核验结果，其余内容可在校验问题中查看。"
     return model, ExtractionResult(status="partial" if incomplete else "success", summary_text=summary, debug_info=debug)
 
 

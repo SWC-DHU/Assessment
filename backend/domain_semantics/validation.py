@@ -1,13 +1,14 @@
 """Consistency checks with explicit distinction between verified evidence and facts."""
 from collections import Counter, defaultdict
-from graphlib import CycleError, TopologicalSorter
 import math
 import re
 
-from .catalog import load_vocabulary, relation_signatures
+import networkx as nx
+
+from .catalog import load_vocabulary, ontology_concept, relation_signatures
 from .schema import Constraint, Issue, SemanticModel, Validation
 
-from .process_graph import FLOW
+from .process_graph import FLOW, flow_endpoints
 
 COLLECTIONS = ("products", "operations", "materials", "material_states", "capabilities", "constraints")
 UNIT = r"秒钟|秒|分钟|小时|毫秒|ms|min|MPa|kPa|Pa|bar|mm|μm|um|°C|℃|[shmK]"
@@ -32,15 +33,25 @@ def canonical_unit(unit: str | None) -> str | None:
 def measurements(text: str):
     for match in QUANTITY.finditer(text):
         operator, value, upper, unit, basis = match.groups()
+        value = float(value.replace("−", "-"))
+        upper = float(upper.replace("−", "-")) if upper is not None else None
+        if not math.isfinite(value) or (upper is not None and not math.isfinite(upper)):
+            continue
         yield (
-            "range" if upper else COMPARATORS.get(operator, operator),
-            float(value.replace("−", "-")), float(upper.replace("−", "-")) if upper else None, canonical_unit(unit), basis,
+            "range" if upper is not None else COMPARATORS.get(operator, operator),
+            value, upper, canonical_unit(unit), basis,
         )
 
 
-def header_unit(text: str) -> str | None:
-    match = re.search(rf"[（(]\s*({UNIT})\s*[）)]", text)
-    return canonical_unit(match[1]) if match else None
+def tabular_measurements(text: str, heading: str):
+    stated = list(measurements(text))
+    if stated:
+        return stated
+    unit = re.search(rf"[（(]\s*({UNIT})(?:\s*(?:/|每)\s*([\w]+))?\s*[）)]", heading)
+    if not unit:
+        return []
+    literal = f"{text.strip()} {unit[1]}" + (f"/{unit[2]}" if unit[2] else "")
+    return list(measurements(literal)) if QUANTITY.fullmatch(literal) else []
 
 
 def tabular_values(constraint: Constraint):
@@ -56,11 +67,8 @@ def tabular_values(constraint: Constraint):
                     or not re.fullmatch(rf"{col[0]}\d+", heading.location.cell)
                     or not any(name in heading.quote for name in heading_names)):
                 continue
-            for operator, number, upper, unit, basis in measurements(value.quote):
+            for operator, number, upper, unit, basis in tabular_measurements(value.quote, heading.quote):
                 yield operator or "=", number, upper, unit, basis
-            unit = header_unit(heading.quote)
-            if unit and re.fullmatch(r"\s*\d+(?:\.\d+)?\s*", value.quote):
-                yield "=", float(value.quote), None, unit, None
 
 
 def quantity_supported(constraint: Constraint) -> bool:
@@ -108,13 +116,22 @@ def validate_model(model: SemanticModel, extra: list[Issue] | None = None, tool=
             state.status = "invalid"
             issue("state_material_reference", "物料状态必须指向基础物料", state.id)
 
+    for op in model.operations:
+        for flow in op.information_flows:
+            flow.status = "verified" if any(cite.status == "verified" and cite.document_id in source_ids
+                                            for cite in flow.evidence) else "pending"
+            if flow.status == "pending":
+                issue("information_evidence_pending", f"信息流「{flow.name}」的来源待核验", op.id, "pending")
+
     terminals = relation_signatures(model.ontology_version)
-    dependency_graphs = {"precedence": defaultdict(set), "dependency": defaultdict(set)}
+    dependency_graph = nx.DiGraph()
+    ordering = []
     for relation in model.relations:
         source, target = by_id.get(relation.source_id), by_id.get(relation.target_id)
         a, b = terminals.get(relation.type, (set(), set()))
-        target_type = target.concept if target else "ProductionLine" if relation.target_id == "line" else None
-        if (not source or source.concept not in a or target_type not in b
+        target_type = (ontology_concept(target.concept, model.ontology_version) if target else
+                       "ProductionLine" if relation.target_id == "line" else None)
+        if (not source or ontology_concept(source.concept, model.ontology_version) not in a or target_type not in b
                 or relation.source_id == relation.target_id):
             relation.status = "invalid"
             issue("relation_reference", f"{relation.type} 的关系端点缺失或类型不符", relation.id)
@@ -135,38 +152,17 @@ def validate_model(model: SemanticModel, extra: list[Issue] | None = None, tool=
             relation.status = "invalid"
             issue("unexpected_rework_limit", "返工次数仅适用于返工关系", relation.id)
         elif relation.status == "verified" and relation.type in FLOW and relation.type != "reworksTo":
-            reverse, _, _ = FLOW[relation.type]
-            later, earlier = ((relation.source_id, relation.target_id) if reverse
-                              else (relation.target_id, relation.source_id))
-            group = "dependency" if relation.type == "dependsOn" else "precedence"
-            dependency_graphs[group][later].add(earlier)
+            earlier, later = flow_endpoints(relation)
+            dependency_graph.add_edge(earlier, later)
+            ordering.append((relation, earlier, later))
 
-    def reachable(dependencies, start, target):
-        visited, pending = set(), [start]
-        while pending:
-            node = pending.pop()
-            if node == target:
-                return True
-            if node not in visited:
-                visited.add(node)
-                pending.extend(dependencies[node] - visited)
-        return False
-
-    for group, dependencies in dependency_graphs.items():
-        try:
-            tuple(TopologicalSorter(dependencies).static_order())
-        except CycleError:
-            for relation in model.relations:
-                if relation.status != "verified" or relation.type not in FLOW or relation.type == "reworksTo":
-                    continue
-                if (relation.type == "dependsOn") != (group == "dependency"):
-                    continue
-                reverse, _, _ = FLOW[relation.type]
-                later, earlier = ((relation.source_id, relation.target_id) if reverse
-                                  else (relation.target_id, relation.source_id))
-                if reachable(dependencies, earlier, later):
-                    relation.status = "invalid"
-                    issue(f"{group}_cycle", "工艺依赖形成非返工环路", relation.id)
+    cycle_membership = {node: index for index, component in enumerate(nx.strongly_connected_components(dependency_graph))
+                        if len(component) > 1 for node in component}
+    for relation, earlier, later in ordering:
+        if earlier in cycle_membership and cycle_membership[earlier] == cycle_membership.get(later):
+            relation.status = "invalid"
+            code = "dependency_cycle" if relation.type == "dependsOn" else "precedence_cycle"
+            issue(code, "工艺依赖形成非返工环路", relation.id)
 
     component_groups = defaultdict(list)
     for relation in model.relations:
@@ -183,11 +179,12 @@ def validate_model(model: SemanticModel, extra: list[Issue] | None = None, tool=
                 relation.status = "conflict"
                 issue("component_quantity_conflict", "同一组件及计量基准出现不同数量", relation.id, "conflict")
 
+    pending_measurements = {item.path for item in issues if item.code == "measurement_unparsed"}
     if tool is None:
-        validate_constraints(model.constraints, by_id, issue)
+        validate_constraints(model.constraints, by_id, issue, pending_measurements)
     else:
         tool("validate_constraints", f"{len(model.constraints)} 条工艺约束", validate_constraints,
-             model.constraints, by_id, issue)
+             model.constraints, by_id, issue, pending_measurements)
 
     vocabulary = load_vocabulary()["capabilities"]
     for capability in model.capabilities:
@@ -199,6 +196,22 @@ def validate_model(model: SemanticModel, extra: list[Issue] | None = None, tool=
             capability.status = "invalid"
             issue("capability_unknown", "能力编码不在词表内", capability.id)
 
+    for finding in issues:
+        if finding.code in {"field_conflict", "identity_conflict"} and finding.path in by_id:
+            by_id[finding.path].status = "conflict"
+    conflicting_predecessors = {finding.path for finding in issues if finding.code == "field_conflict"
+                                and "precursor_declaration" in finding.message}
+    for relation in model.relations:
+        if (relation.type == "hasPredecessor" and relation.source_id in conflicting_predecessors) or (
+            relation.type == "mergesInto" and relation.target_id in conflicting_predecessors
+        ):
+            relation.status = "conflict"
+        if relation.status == "verified":
+            if relation.type == "appliesTo":
+                relation.status = by_id[relation.source_id].status
+            elif relation.type == "requiresCapability":
+                relation.status = by_id[relation.target_id].status
+
     model.unresolved_items = issues
     states = {item.status for item in issues}
     status = next((state for state in ("invalid", "conflict", "pending", "unprocessed") if state in states), "verified")
@@ -206,9 +219,11 @@ def validate_model(model: SemanticModel, extra: list[Issue] | None = None, tool=
     return model
 
 
-def validate_constraints(constraints: list[Constraint], by_id: dict, issue) -> None:
+def validate_constraints(constraints: list[Constraint], by_id: dict, issue, pending_measurements: set[str]) -> None:
     grouped = defaultdict(list)
-    parameters = load_vocabulary()["parameters"]
+    vocabulary = load_vocabulary()
+    parameters = vocabulary["parameters"]
+    qualitative = vocabulary["quality_parameters"]
     for value in constraints:
         if value.target_id != "line" and (value.target_id not in by_id or
                 by_id[value.target_id].concept not in {"Operation", "Product", "Capability"}):
@@ -218,18 +233,24 @@ def validate_constraints(constraints: list[Constraint], by_id: dict, issue) -> N
             if value.status == "verified":
                 value.status = "pending"
             issue("parameter_unmapped", "约束参数尚未映射", value.id, "pending")
-        if value.parameter_code and value.parameter_code not in parameters:
+        if (value.parameter_code and value.parameter_code not in parameters
+                and (value.parameter_code not in qualitative or value.comparator is not None)):
             value.status = "invalid"
             issue("parameter_unknown", "参数编码不在词表内", value.id)
-        elif value.parameter_code and value.unit and value.unit not in parameters[value.parameter_code]["units"]:
+        elif value.parameter_code in parameters and value.unit and value.unit not in parameters[value.parameter_code]["units"]:
             value.status = "invalid"
             issue("unit_mismatch", "单位不适用于此参数", value.id)
+        if any(code not in qualitative for code in value.related_parameter_codes):
+            value.status = "invalid"
+            issue("parameter_unknown", "关联参数编码不在定性词表内", value.id)
         if any(entry.status == "verified" for entry in value.evidence) and not quantity_supported(value):
             value.status = "invalid"
             issue("quantity_unsupported", "原文未支持比较符、数值、范围、单位或计量基准", value.id)
         if value.lower is not None and value.upper is not None and value.lower > value.upper:
             value.status = "invalid"
             issue("range_bounds", "约束的下限高于上限", value.id)
+        if value.id in pending_measurements and value.status == "verified":
+            value.status = "pending"
         if value.status == "verified" and value.parameter_code and value.comparator:
             grouped[(value.target_id, value.parameter_code, value.basis)].append(value)
 

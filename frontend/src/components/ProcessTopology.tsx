@@ -1,7 +1,7 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Empty, Select } from "antd";
-import { ArrowUpToLine, Maximize, Minus, Plus, RotateCcw } from "lucide-react";
+import { ArrowUpToLine, Maximize, Minus, Plus, RotateCcw, Workflow } from "lucide-react";
 import type { SemanticModel } from "../types";
 import { relationLabel } from "./semanticPresentation";
 import { layoutTopology, topologyCard, topologyPath } from "./topologyLayout";
@@ -17,10 +17,11 @@ interface ProcessTopologyProps {
   positions: ReadonlyMap<string, Point>;
   onSelect: (id: string | null) => void;
   onMove: (id: string, point: Point) => void;
+  onResetLayout: () => void;
   renderDetail?: (close: () => void) => ReactNode;
 }
 
-export function ProcessTopology({ model, selected, positions, onSelect, onMove, renderDetail }: ProcessTopologyProps) {
+export function ProcessTopology({ model, selected, positions, onSelect, onMove, onResetLayout, renderDetail }: ProcessTopologyProps) {
   const graph = useMemo(() => layoutTopology(model), [model]);
   const [located, setLocated] = useState<string>();
   const [returnToStart, setReturnToStart] = useState(false);
@@ -110,7 +111,16 @@ export function ProcessTopology({ model, selected, positions, onSelect, onMove, 
       <button type="button" className="topology-control" disabled={!graph.start} onClick={goToStart}>
         <ArrowUpToLine size={14} aria-hidden="true" />回到起点
       </button>
+      <button type="button" className="topology-control" disabled={!graph.nodes.length} onClick={() => {
+        onResetLayout();
+        setLocated(undefined);
+        viewport.fit(graph.points, cardWidth, cardHeight);
+      }}><Workflow size={14} aria-hidden="true" />自动布局</button>
     </div>
+    {!!graph.nodes.length && <div className="topology-legend" aria-label="工序类型图例">
+      <span data-kind="main">主线</span><span data-kind="bypass">旁路</span><span data-kind="merge">汇合</span>
+      <span data-kind="conditional">条件与待确认</span>
+    </div>}
     {graph.nodes.length ? <>
       <div className="graph-legend"><span>直接、分支及汇合</span><span>条件、返工及其他关系</span></div>
       <div className="topology-workspace" data-detail={hasDetail}>

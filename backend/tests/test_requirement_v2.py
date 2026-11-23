@@ -54,8 +54,8 @@ def test_explicit_condition_routes_and_material_states_from_columns():
     data = parse_file_bytes(values, "route.csv")
     doc = file_document("csv", "route.csv", data.parsed_text, data.parsed_preview)
     model = project([doc], "route")
-    assert [item.name for item in model.materials] == ["部件", "合格部件"]
-    assert len(model.material_states) == 2
+    assert [item.name for item in model.materials] == ["部件"]
+    assert len(model.material_states) == 3
     assert model.operations[0].output_state_ids == model.operations[1].input_state_ids
     assert model.process_graph.nodes[1].category == "optional"
     edge = model.process_graph.edges[0]
@@ -123,6 +123,13 @@ async def test_real_workbook_and_narrative_have_distinct_gold_and_provenance():
     assert metrics["mapping_accuracy"] == metrics["evidence_accuracy"] == 1
     assert result.debug_info["request_count"] == 0
     assert len(model.modeling_intents) == 4
+    feed, = [item for item in model.capabilities if item.code == "FEED"]
+    assert len(feed.operation_ids) == 4
+    assert set(feed.raw_names) == {"电芯供料", "导热壳上料", "中板结构件供料与输送", "端板结构件供料与输送"}
+    assert not ({"识别信息", "标识信息", "合格模组", "不合格模组（如有）"} & {item.name for item in model.materials})
+    assert {(op.number, flow.name, flow.evidence[0].location.cell) for op in model.operations
+            for flow in op.information_flows} == {("04", "识别信息", "E5"), ("Z1", "标识信息", "E6")}
+    assert not any(edge.type == "mergesInto" for edge in model.relations)
     assert {node.number for node in model.process_graph.nodes if node.category == "bypass"} == {"Z1", "Z2", "Z3"}
     assert {(edge.source.removeprefix("operation:"), edge.target.removeprefix("operation:"))
             for edge in model.process_graph.edges if edge.kind == "merge"} == {
@@ -145,3 +152,92 @@ async def test_numbered_statements_are_processed_without_requiring_a_provider():
     assert [item.number for item in model.operations] == ["P7", "X9"]
     assert model.process_graph.edges[0].kind == "declared_predecessor"
     assert model.process_graph.edges[0].evidence[0].method == "rule"
+
+
+def test_networkx_detects_cycle_across_dependency_and_direct_workflow():
+    text = "检测直接转入清洗。检测依赖清洗。"
+    model = project([message_document("cycle", text)], "cycle-run", {
+        "operations": [
+            {"id": "inspect", "name": "检测", "evidence": [{"quote": "检测直接转入清洗"}]},
+            {"id": "clean", "name": "清洗", "evidence": [{"quote": "检测依赖清洗"}]},
+        ],
+        "relations": [
+            {"type": "directlyPrecedes", "source_id": "inspect", "target_id": "clean",
+             "evidence": [{"quote": "检测直接转入清洗"}]},
+            {"type": "dependsOn", "source_id": "inspect", "target_id": "clean",
+             "evidence": [{"quote": "检测依赖清洗"}]},
+        ],
+    })
+    assert {issue.code for issue in model.validation.issues} >= {"precedence_cycle", "dependency_cycle"}
+    assert all(edge.status == "invalid" for edge in model.process_graph.edges)
+
+
+def test_numeric_column_and_quality_clause_keep_parameter_target_and_evidence():
+    text = ("工序编号,工序名称,压力(kPa),节拍(s/件),关键工艺约束\n"
+            "01,检测,50,≤120,温度不超过40 ℃；完成电压及绝缘检测\n")
+    parsed = parse_file_bytes(text.encode(), "measurements.csv")
+    model = project([file_document("file", "measurements.csv", parsed.parsed_text, parsed.parsed_preview)], "pressure")
+    by_code = {item.parameter_code: item for item in model.constraints}
+    assert (by_code["pressure"].comparator, by_code["pressure"].value, by_code["pressure"].unit) == ("=", 50, "kPa")
+    assert [cite.location.cell for cite in by_code["pressure"].evidence] == ["C2", "C1"]
+    assert (by_code["temperature"].comparator, by_code["temperature"].unit) == ("<=", "°C")
+    assert (by_code["takt_time"].comparator, by_code["takt_time"].value, by_code["takt_time"].basis) == ("<=", 120, "件")
+    assert all(item.status == "verified" and item.target_id == "operation:01" for item in by_code.values())
+    assert by_code["electrical_test"].comparator is None
+
+
+@pytest.mark.asyncio
+async def test_partial_source_retries_only_uncached_batches(monkeypatch):
+    from app.services import semantic_execution
+
+    text = "\n".join(f"其他自然语言条件第{i}项。" for i in range(11))
+    parsed = parse_file_bytes(text.encode(), "supplement.md")
+    source = file_document("notes", "supplement.md", parsed.parsed_text, parsed.parsed_preview)
+    calls = []
+
+    async def provider(config, user_message, files, current_state=None):
+        calls.append(files[0].parsed_text)
+        return ExtractionResult(status="success", extracted_json={},
+                                debug_info={"request_count": 1, "finish_reason": "stop"})
+
+    monkeypatch.setattr(semantic_execution, "run_extraction", provider)
+    config = ExtractorConfig(base_url="http://fixture", api_key="placeholder", model="test", request_budget=1)
+    message = message_document("input-1", "工序为检测，编号X9。")
+    first, result = await execute(config, message, [source], "first", None)
+    assert result.status == "partial"
+    assert [batch.status for batch in first.metadata.batches] == ["complete", "unprocessed"]
+    second, result = await execute(config, message_document("input-2", ""), [source], "second", first)
+    assert result.status == "success" and second.metadata.extraction_status == "complete"
+    assert len(calls) == 2 and "第0项" in calls[0] and "第0项" not in calls[1]
+    assert "notes" in second.metadata.processed_source_ids
+    third, result = await execute(config, message_document("input-3", ""), [source], "third", second)
+    assert len(calls) == 2 and third.content_digest == second.content_digest
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_revision_preserves_base_and_does_not_call_provider(monkeypatch):
+    from app.services import semantic_execution
+
+    async def provider(*args, **kwargs):
+        pytest.fail("Ambiguous revision must go through review before model calls")
+
+    monkeypatch.setattr(semantic_execution, "run_extraction", provider)
+    original = project([message_document("old", "工序为检测，编号X9。")], "base")
+    config = ExtractorConfig(base_url="http://fixture", api_key="placeholder", model="test")
+    revised, result = await execute(config, message_document("new", "请修改工时。"), [], "ambiguous", original)
+    assert result.status == "partial"
+    assert revised.operations == original.operations and not revised.constraints
+    assert any(issue.code == "revision_pending" for issue in revised.validation.issues)
+    assert result.debug_info["request_count"] == 0
+
+
+def test_structured_product_component_has_quantity_and_cell_evidence():
+    text = "工序编号,工序名称,产品名称,产品组成\n01,装配,标准模组,8个方形电芯；结构连接件\n"
+    parsed = parse_file_bytes(text.encode(), "components.csv")
+    doc = file_document("file", "components.csv", parsed.parsed_text, parsed.parsed_preview)
+    model = project([doc], "components")
+    cell, = [item for item in model.materials if item.name == "方形电芯"]
+    relation, = [edge for edge in model.relations if edge.type == "hasComponent" and edge.target_id == cell.id]
+    assert (relation.quantity.value, relation.quantity.unit, relation.quantity.basis) == (8, "个", "每标准模组")
+    assert relation.evidence[0].location.cell == "D2"
+    assert relation.evidence[0].quote == "8个方形电芯"

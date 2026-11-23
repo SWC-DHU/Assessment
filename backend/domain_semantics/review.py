@@ -64,6 +64,7 @@ def apply_review(base, run_id, message_id, review: ReviewRequest):
         builder.model.metadata.session_id = base.metadata.session_id
         builder.model.metadata.batches = base.metadata.batches
         builder.model.metadata.extraction_status = base.metadata.extraction_status
+        builder.model.metadata.processed_source_ids = base.metadata.processed_source_ids
     cite = document.fragments[0].evidence(run_id, method="manual")
 
     def require(key, kind):

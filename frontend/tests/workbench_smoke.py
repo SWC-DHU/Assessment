@@ -1,6 +1,7 @@
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import re
 from threading import Event, Thread
 from time import sleep
 from playwright.sync_api import sync_playwright, expect
@@ -146,27 +147,27 @@ def verify_semantic_workspace(page, screenshots, compact=False):
     search.fill("FEED")
     directory.get_by_label("实体类型", exact=True).select_option("capabilities")
     directory.get_by_label("实体校验状态").select_option("verified")
-    feed_row = directory.get_by_role("button", name="电芯供料")
+    feed_row = directory.get_by_role("button", name="供料")
     feed_row.click()
     detail = page.get_by_role("complementary", name="语义详情")
-    expect(detail.get_by_role("heading", name="电芯供料", exact=True)).to_be_visible()
+    expect(detail.get_by_role("heading", name="供料", exact=True)).to_be_visible()
     page.get_by_role("button", name="查看关系", exact=True).click()
 
     graph = page.get_by_role("region", name="语义关系图")
     center = graph.locator("[data-center=true]")
     operation = graph.locator('[data-entity="operation:01"]')
-    relation = graph.get_by_role("button", name="需要能力 → 电芯供料")
-    expect(center).to_have_text("制造能力电芯供料")
+    relation = graph.get_by_role("button", name=re.compile(r"^01 · .* → 需要能力 → 供料"))
+    expect(center).to_have_text("制造能力供料")
     expect(operation).to_be_in_viewport(ratio=0.95)
     expect(relation).to_have_attribute("data-status", "verified")
     expect(relation.locator(".semantic-edge-stroke")).to_have_css("stroke-dasharray", "none")
-    assert graph.locator("button[data-entity]").count() == 2
+    assert graph.locator("button[data-entity]").count() == 5
     if compact:
         assert detail.bounding_box()["y"] >= graph.bounding_box()["y"] + graph.bounding_box()["height"]
         assert graph.bounding_box()["width"] == detail.bounding_box()["width"]
 
     relation.locator("text").click()
-    expect(detail.get_by_role("heading", name="需要能力 → 电芯供料")).to_be_visible()
+    expect(detail.get_by_role("heading", name="需要能力 → 供料")).to_be_visible()
     detail.get_by_role("tab", name="原文证据").click()
     expect(detail.get_by_text("Sheet1 / C2", exact=True)).to_be_visible()
     expect(center).to_be_in_viewport(ratio=0.95)
@@ -195,13 +196,15 @@ def verify_semantic_workspace(page, screenshots, compact=False):
         detail.get_by_role("button", name="以此为中心").click()
         expect(center).to_have_attribute("data-entity", "operation:01")
         page.get_by_role("button", name="返回上一个焦点").click()
-        expect(center).to_have_text("制造能力电芯供料")
+        expect(center).to_have_text("制造能力供料")
         page.get_by_role("button", name="全图", exact=True).click()
-        assert graph.locator("button[data-entity]").count() > 2
+        page.get_by_label("关系图实体类型").select_option("all")
+        assert graph.locator("button[data-entity]").count() > 5
         page.get_by_role("button", name="返回焦点", exact=True).click()
-        expect(center).to_have_text("制造能力电芯供料")
+        expect(center).to_have_text("制造能力供料")
 
     page.get_by_role("button", name="实体列表", exact=True).click()
+    directory.get_by_label("实体类型", exact=True).select_option("capabilities")
     expect(feed_row).to_have_attribute("aria-pressed", "true")
     expect(search).to_have_value("FEED")
     assert page.locator(".result-body").evaluate("el => el.scrollWidth === el.clientWidth && el.scrollTop === 0")
@@ -232,18 +235,49 @@ def verify_cancel(browser, base_url):
         page.goto(base_url)
         expect(page.get_by_label("输入工艺需求")).to_be_enabled()
         page.get_by_label("输入工艺需求").fill("测试中止时的记录一致性。")
-        page.get_by_role("button", name="发送测试").click()
+        page.get_by_role("button", name="开始解析").click()
         assert entered.wait(5), "Provider did not receive the running request"
         expect(page.get_by_text("分批提取事实 batch-1 · 进行中", exact=True)).to_be_visible(timeout=1500)
         with page.expect_response(lambda response: response.url.endswith("/cancel")) as cancel:
             page.get_by_role("button", name="中止").click()
         assert cancel.value.status == 202
-        expect(page.get_by_role("button", name="发送测试")).to_be_visible()
+        expect(page.get_by_role("button", name="开始解析")).to_be_visible()
         # Let the local provider finish so the assertion also detects orphaned runs.
         sleep(2.5)
         persisted = page.request.get(session_url).json()
         assert persisted["messages"] == [] and persisted["current_extracted_json"] is None
         page.close()
+
+
+
+def verify_mixed_overview(browser, base_url, workbook, screenshots):
+    narrative = workbook.with_name("自然语言建模需求.md")
+    if not narrative.is_file():
+        return
+    page = browser.new_page(viewport={"width": 1512, "height": 982}, timezone_id="Asia/Shanghai")
+    session = page.request.post(base_url + "/api/sessions", data={}).json()
+    url = f"{base_url}/api/sessions/{session['id']}"
+    files = page.request.post(url + "/files", multipart={"files": {
+        "name": workbook.name, "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "buffer": workbook.read_bytes(),
+    }}).json()
+    run = page.request.post(url + "/run", data={
+        "message": narrative.read_text(), "file_ids": [files[0]["id"]], "use_demo_fallback": True,
+    })
+    assert run.ok, run.text()
+    page.goto(base_url)
+    page.get_by_role("button", name="打开语义结果 →").last.click()
+    amount = page.get_by_role("button", name=re.compile(r"方形电芯.*8 个"))
+    limit = page.get_by_role("button", name=re.compile(r"≤ 120 s \/ 模组"))
+    expect(amount).to_be_visible()
+    expect(limit).to_be_visible()
+    if screenshots:
+        page.screenshot(path=screenshots / "mixed-overview.png")
+    limit.click()
+    detail = page.get_by_role("complementary", name="语义详情")
+    detail.get_by_role("tab", name="原文证据").click()
+    expect(detail.get_by_text(re.compile(r"设计下线节拍不超过120"))).to_be_visible()
+    page.close()
 
 
 parser = argparse.ArgumentParser(description="Chrome regression against an isolated Assessment instance")
@@ -269,11 +303,15 @@ with sync_playwright() as pw:
     expect(page.get_by_label("输入工艺需求")).to_be_enabled()
     page.locator('input[type=file]').set_input_files({"name":"工艺需求文件.xlsx","mimeType":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","buffer":workbook.read_bytes()})
     expect(page.get_by_text("工艺需求文件.xlsx", exact=True).first).to_be_visible()
-    page.get_by_role("button", name="发送测试").click()
+    page.get_by_role("button", name="开始解析").click()
     expect(page.get_by_role("button", name="打开语义结果 →").last).to_be_visible(timeout=12000)
     expect(page.get_by_role("heading", name="制造需求概览")).to_be_visible()
     if args.screenshots:
         page.screenshot(path=args.screenshots / "desktop.png")
+    page.get_by_role("tab", name="校验问题").click()
+    expect(page.get_by_text("原文给出不合格产出，后续处理路径待确认", exact=True)).to_be_visible()
+    page.get_by_role("button", name="定位事实").first.click()
+    expect(page.get_by_role("complementary", name="语义详情")).to_be_visible()
     page.get_by_role("tab", name="工艺拓扑").click()
     verify_topology_canvas(page, args.screenshots)
     with page.expect_download() as graph_export:
@@ -281,7 +319,7 @@ with sync_playwright() as pw:
     assert graph_export.value.suggested_filename.startswith("process-graph-")
     page.get_by_role("tab", name="语义模型").click()
     page.get_by_role("button", name="浏览本体").click()
-    expect(page.get_by_role("dialog", name="领域本体 2.0.0")).to_be_visible()
+    expect(page.get_by_role("dialog", name="领域本体 3.0.0")).to_be_visible()
     page.get_by_role("tab", name="对象关系").click()
     page.get_by_placeholder("搜索类、关系或属性").fill("directlyPrecedes")
     expect(page.get_by_text("directlyPrecedes", exact=True)).to_be_visible()
@@ -291,7 +329,8 @@ with sync_playwright() as pw:
     with page.expect_download() as download:
         page.get_by_role("button", name="JSON", exact=True).click()
     assert download.value.suggested_filename.endswith(".json")
-    page.get_by_role("tab", name="模板预览").click()
+    page.get_by_role("button", name="更多结果视图").click()
+    page.get_by_role("menuitem", name="模板预览").click()
     page.get_by_label("输出模板", exact=True).click()
     page.get_by_role("option", name="产线节拍与物料汇总表", exact=False).click()
     expect(page.get_by_role("columnheader", name="单件工时", exact=False)).to_be_visible()
@@ -299,16 +338,18 @@ with sync_playwright() as pw:
     with page.expect_download() as download:
         page.get_by_role("button", name="XLSX", exact=True).click()
     assert download.value.suggested_filename.endswith(".xlsx")
-    page.get_by_role("tab", name="Debug").click()
+    page.get_by_role("button", name="更多结果视图").click()
+    page.get_by_role("menuitem", name="Debug").click()
     expect(page.get_by_text("输入文件解析", exact=True)).to_be_visible()
     expect(page.get_by_text("确定性抽取", exact=True)).to_be_visible()
     page.get_by_role("tab", name="概览").click()
     page.get_by_role("button", name="基于此版本修订").click()
     page.get_by_label("输入工艺需求").fill("把第三道工序的工时修改为45秒。")
-    page.get_by_role("button", name="发送测试").click()
+    page.get_by_role("button", name="开始解析").click()
     expect(page.get_by_label("输入工艺需求")).to_be_enabled()
     expect(page.get_by_text("已生成语义版本。", exact=False)).to_have_count(2, timeout=12000)
-    page.get_by_role("tab", name="模板预览").click()
+    page.get_by_role("button", name="更多结果视图").click()
+    page.get_by_role("menuitem", name="模板预览").click()
     expect(page.get_by_role("cell", name="45", exact=True)).to_be_visible()
     page.get_by_role("tab", name="概览").click()
     page.get_by_role("button", name="人工审核").click()
@@ -328,7 +369,7 @@ with sync_playwright() as pw:
         page.set_viewport_size({"width": width, "height": 844})
         if width <= 1040:
             page.get_by_role("button", name="解析结果", exact=True).click()
-        expect(page.get_by_role("heading", name="结果工作区")).to_be_visible()
+        expect(page.get_by_role("heading", name="解析结果")).to_be_visible()
         assert page.evaluate("document.documentElement.scrollWidth === innerWidth"), width
         assert page.evaluate("document.querySelector('main').scrollWidth <= innerWidth"), width
         if width == 390:
@@ -365,6 +406,7 @@ with sync_playwright() as pw:
             page.get_by_role("button", name="需求对话", exact=True).click()
             expect(page.get_by_label("输入工艺需求")).to_be_visible()
     assert not errors, errors
+    verify_mixed_overview(browser, args.base_url, workbook, args.screenshots)
     verify_cancel(browser, args.base_url)
     print("Cancellation reached the backend with no partial run persisted.")
     print("Browser regression passed at 1512, 1280, 900, 390 and 320 px.")

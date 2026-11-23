@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SCHEMA_VERSION = "2.0.0"
+SCHEMA_VERSION = "2.1.0"
 ReviewState = Literal["verified", "pending", "conflict", "invalid", "unprocessed"]
 RelationKind = Literal[
     "hasComponent", "hasPredecessor", "consumes", "produces", "requiresCapability",
@@ -71,6 +71,13 @@ class Product(Entity):
     unit: str | None = None
 
 
+class InformationFlow(DomainRecord):
+    name: str
+    direction: Literal["input", "output"]
+    evidence: list[Evidence]
+    status: ReviewState = "verified"
+
+
 class Operation(Entity):
     concept: Literal["Operation"] = "Operation"
     number: str | None = None
@@ -85,6 +92,7 @@ class Operation(Entity):
     output_state_ids: list[str] = Field(default_factory=list)
     equipment_requirement: str | None = None
     equipment_evidence: list[Evidence] = Field(default_factory=list)
+    information_flows: list[InformationFlow] = Field(default_factory=list)
 
 
 class Material(Entity):
@@ -119,6 +127,7 @@ class Constraint(Entity):
     concept: Literal["Constraint"] = "Constraint"
     target_id: str
     parameter_code: str | None = None
+    related_parameter_codes: list[str] = Field(default_factory=list)
     comparator: Comparator | None = None
     value: float | None = None
     lower: float | None = None
@@ -160,6 +169,7 @@ class GraphNode(DomainRecord):
     name: str
     number: str | None = None
     category: Literal["main", "bypass", "merge", "optional", "unspecified"]
+    layer: int | None = None
     input_material_ids: list[str]
     output_material_ids: list[str]
     capability_ids: list[str]
@@ -197,6 +207,8 @@ class BatchReport(DomainRecord):
     input_characters: int
     accepted_rows: int = 0
     reason: str | None = None
+    fragments: list[str] = Field(default_factory=list)
+    input_digest: str | None = None
 
 
 class RequirementMetadata(DomainRecord):
@@ -205,15 +217,17 @@ class RequirementMetadata(DomainRecord):
     session_id: str | None = None
     extraction_status: ExtractionStatus = "complete"
     batches: list[BatchReport] = Field(default_factory=list)
+    processed_source_ids: list[str] = Field(default_factory=list)
 
 
-class ModelingIntent(Fact):
-    kind: Literal["digital_twin_modeling", "resource_matching", "model_linking", "simulation_validation"]
+class Objective(Fact):
+    concept: Literal["Objective"] = "Objective"
+    kind: str = Field(min_length=1)
     description: str
 
 
 class RequirementSemanticModel(DomainRecord):
-    schema_version: Literal["1.0.0", "2.0.0"] = SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "2.0.0", "2.1.0"] = SCHEMA_VERSION
     ontology_version: str
     vocabulary_version: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -224,7 +238,7 @@ class RequirementSemanticModel(DomainRecord):
     parent_version_id: str | None = None
     metadata: RequirementMetadata | None = None
     material_states: list[MaterialState] = Field(default_factory=list)
-    modeling_intents: list[ModelingIntent] = Field(default_factory=list)
+    modeling_intents: list[Objective] = Field(default_factory=list)
     process_graph: ProcessGraph | None = None
     evidences: dict[str, Evidence] = Field(default_factory=dict)
     products: list[Product] = Field(default_factory=list)

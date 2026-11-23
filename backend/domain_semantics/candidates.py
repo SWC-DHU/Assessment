@@ -66,4 +66,5 @@ class ExtractionCandidates(DomainRecord):
     material_states: list[MaterialStateCandidate] = Field(default_factory=list)
     capabilities: list[NamedCandidate] = Field(default_factory=list)
     constraints: list[ConstraintCandidate] = Field(default_factory=list)
+    objectives: list[NamedCandidate] = Field(default_factory=list)
     relations: list[RelationCandidate] = Field(default_factory=list)

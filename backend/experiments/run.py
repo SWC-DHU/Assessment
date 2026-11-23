@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 from time import perf_counter
+from collections import Counter
 
 from app.config import settings
 from app.database import SessionLocal
@@ -14,7 +15,7 @@ from app.services.parser import parse_file_path
 from app.services.redaction import redact, safe_endpoint
 from app.services.semantic_execution import PROMPT_VERSION, candidate_context, execute, schema_instruction
 from domain_semantics import ontology_metadata
-from domain_semantics.catalog import candidates
+from domain_semantics.catalog import candidates, capability_terms
 from domain_semantics.pipeline import candidate_errors
 from domain_semantics.schema import SCHEMA_VERSION
 from domain_semantics.sources import digest, file_document, locate, message_document
@@ -56,8 +57,9 @@ def rows(data, group):
 
 def score(data, gold, docs, *, schema_valid):
     gold_ops, gold_relations = facts(gold)
+    gold_information = {tuple(item) for item in gold.get("information_flows", [])}
     scope = {"hasPredecessor", "consumes", "produces"}
-    gold_materials = {target for kind, _, target in gold_relations if kind in {"consumes", "produces"}}
+    gold_materials = {target for kind, _, target in gold_relations - gold_information if kind in {"consumes", "produces"}}
     observed_materials = {item["name"] for item in rows(data, "materials") if isinstance(item.get("name"), str)}
     gold_products = set(gold.get("products", []))
     observed_products = {item["name"] for item in rows(data, "products") if isinstance(item.get("name"), str)}
@@ -68,7 +70,7 @@ def score(data, gold, docs, *, schema_valid):
     predicted_ops = {(op.get("number"), op.get("name")) for op in ops
                      if isinstance(op.get("name"), str) and (op.get("number") is None or isinstance(op["number"], str))}
     predicted_edges = set()
-    is_v2_model = data.get("schema_version") == "2.0.0"
+    is_versioned = data.get("schema_version") in {"2.0.0", "2.1.0"}
     for edge in rows(data, "relations"):
         if (not all(isinstance(edge.get(field), str) for field in ("type", "source_id", "target_id"))
                 or edge["type"] not in scope or edge.get("status") not in {None, "verified"}):
@@ -76,13 +78,13 @@ def score(data, gold, docs, *, schema_valid):
         kind = edge["type"]
         target = lookups.get(edge["target_id"], edge["target_id"])
         labels = [target]
-        if is_v2_model and kind in {"consumes", "produces"}:
+        if is_versioned and kind in {"consumes", "produces"}:
             labels = [cite["quote"] for cite in rows(edge, "evidence") if cite.get("method") == "structured"
                       and isinstance(cite.get("quote"), str) and (cite.get("location") or {}).get("cell")] or labels
         for label in labels:
             predicted_edges.add((kind, lookups.get(edge["source_id"], edge["source_id"]), label))
     canonical_material_count = len(observed_materials)
-    if is_v2_model and "rows" in gold:
+    if is_versioned and "rows" in gold:
         # Gold annotates workbook labels, including explicitly named process states.
         observed_materials = {target for kind, _, target in predicted_edges if kind in {"consumes", "produces"}}
     expected_quantities = {tuple(item) for item in gold["numeric_constraints"]}
@@ -112,13 +114,20 @@ def score(data, gold, docs, *, schema_valid):
         and all(isinstance(edge.get(field), str) for field in ("source_id", "target_id"))
     }
     gold_mapping = gold["mapping_sample"]
-    mapped = {value["name"]: value.get("code") for value in rows(data, "capabilities")
-              if isinstance(value.get("name"), str)}
+    capabilities = rows(data, "capabilities")
+    mapped = {term: value.get("code") for value in capabilities if isinstance(value.get("name"), str)
+              for raw in [value["name"], *rows_of_strings(value.get("raw_names"))] for term in [raw, *capability_terms(raw)]
+              if value.get("code") in candidates("capabilities", term)}
     mapped_correct = sum(mapped.get(name) == code for name, code in gold_mapping.items())
     mapped_count = sum(isinstance(mapped.get(name), str) for name in gold_mapping)
     matched_quotes = total_quotes = uncited = fact_count = 0
-    for group in ("products", "operations", "materials", "material_states", "capabilities", "constraints", "relations"):
-        for item in rows(data, group):
+    information = {(("consumes" if flow.get("direction") == "input" else "produces"), op.get("number"), flow.get("name"))
+                   for op in ops for flow in rows(op, "information_flows") if flow.get("status") == "verified"}
+    collections = [rows(data, key) for key in ("products", "operations", "materials", "material_states",
+                                              "capabilities", "constraints", "relations", "modeling_intents")]
+    collections.append([flow for op in ops for flow in rows(op, "information_flows")])
+    for collection in collections:
+        for item in collection:
             cites = rows(item, "evidence")
             if not cites and isinstance(item.get("source_quote"), str):
                 cites = [{"quote": item["source_quote"]}]
@@ -138,7 +147,12 @@ def score(data, gold, docs, *, schema_valid):
         "component_quantities": prf(expected_components, actual_components),
         "canonical_material_count": canonical_material_count,
         "material_state_count": len(rows(data, "material_states")),
-        "process_relations": prf(gold_relations, predicted_edges),
+        "process_relations": prf(gold_relations, predicted_edges | information),
+        "information_flows": prf(gold_information, information),
+        "capability_entities": len(capabilities),
+        "duplicate_capability_codes": sum(count - 1 for count in Counter(item.get("code") for item in capabilities if item.get("code")).values()),
+        "semantic_relation_count": len(rows(data, "relations")),
+        "invalid_relation_count": sum(item.get("status") == "invalid" for item in rows(data, "relations")),
         "numeric_constraints": prf(expected_quantities, predicted_quantities),
         "mapping_accuracy": mapped_correct / mapped_count if mapped_count else None,
         "mapping_coverage": mapped_count / len(gold_mapping) if gold_mapping else None,
@@ -147,6 +161,10 @@ def score(data, gold, docs, *, schema_valid):
         "schema_valid": schema_valid,
         "topology_completeness": topology["recall"],
     }
+
+
+def rows_of_strings(value):
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
 
 
 def config_for(args):
@@ -204,7 +222,7 @@ async def run(args):
                 data = redact(result.extracted_json or {}, config.api_key)
                 schema_valid = result.extracted_json is not None and not candidate_errors(data)
             output.append({
-                "method": method.upper(), "implementation": f"{method.upper()}-2.0",
+                "method": method.upper(), "implementation": f"{method.upper()}-{PROMPT_VERSION}",
                 "trial": trial + 1, "status": result.status,
                 "coverage_status": result.debug_info.get("extraction_status"),
                 "finish_reason": result.debug_info.get("finish_reason"),
@@ -225,7 +243,7 @@ async def run(args):
             "provider": safe_endpoint(config.base_url), "model": config.model, "temperature": config.temperature,
             "max_tokens": config.max_tokens, "timeout_s": config.timeout_seconds, "request_budget": config.request_budget,
             "json_mode": config.json_mode, "offline": args.offline, "prompt_version": PROMPT_VERSION,
-            "evaluation_version": "2.0.0",
+            "evaluation_version": "2.1.0",
             "schema_version": SCHEMA_VERSION, "ontology_version": metadata["ontology_version"],
             "vocabulary_version": metadata["vocabulary"]["version"],
         },

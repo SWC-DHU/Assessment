@@ -5,7 +5,7 @@ import json
 import re
 
 from domain_semantics.candidates import ExtractionCandidates
-from domain_semantics.sources import Document, Fragment
+from domain_semantics.sources import Document, Fragment, digest
 from domain_semantics.structured_text import clauses
 
 from .llm_extractor import FileInputContext
@@ -13,6 +13,10 @@ from .llm_extractor import FileInputContext
 GROUPS = tuple(ExtractionCandidates.model_fields)
 MAX_BATCH_CHARS = 1100
 MAX_BATCH_FRAGMENTS = 8
+
+
+def fragment_digest(part: Fragment) -> str:
+    return digest(json.dumps([part.document_id, part.key, part.text], ensure_ascii=False))
 
 
 @dataclass(frozen=True)
@@ -65,7 +69,8 @@ def split_text(fragment: Fragment) -> list[Fragment]:
 
 
 def plan_batches(documents: list[Document], covered: set[tuple[str, str]],
-                 covered_text: set[tuple[str, str, str]] | None = None) -> list[ExtractionBatch]:
+                 covered_text: set[tuple[str, str, str]] | None = None,
+                 completed: set[str] | None = None) -> list[ExtractionBatch]:
     result = []
     parts_by_scope = defaultdict(list)
     for doc in documents:
@@ -76,7 +81,8 @@ def plan_batches(documents: list[Document], covered: set[tuple[str, str]],
             section = position.sheet or (f"第 {position.page} 页" if position.page else "正文")
             parts_by_scope[(doc.ref.document_id, f"{doc.ref.name} · {section}")].extend(
                 (part for part in split_text(fragment) if
-                 (part.document_id, part.key, part.text.strip().rstrip("。！？；")) not in (covered_text or set())),
+                 (part.document_id, part.key, part.text.strip().rstrip("。！？；")) not in (covered_text or set())
+                 and fragment_digest(part) not in (completed or set())),
             )
     for (_, scope), fragments in parts_by_scope.items():
         current, size = [], 0

@@ -39,7 +39,7 @@
 
 | 路径 | 方法与行为 |
 | --- | --- |
-| `/api/semantics/catalog?version=2.0.0&term=工序` | GET。查询 RDF 类、属性与关系端点。`version=1.0.0` 查历史定义 |
+| `/api/semantics/catalog?version=3.0.0&term=工序` | GET。查询 RDF 类、属性与关系端点。支持 `version=1.0.0`、`version=2.0.0` 查询历史定义 |
 | `/api/semantics/terms?group=operations&text=堆叠作业` | GET。查询受控术语与映射依据 |
 | `/api/semantics/tools` | GET。读取需求智能体的实际工具目录 |
 | `/api/sessions/{id}/runs/{run_token}/progress` | GET。读取单进程在途运行的阶段、批次和实际状态 |
@@ -47,3 +47,5 @@
 | `/api/semantics/sessions/{id}/versions/{version}/review` | POST。提交人工审核动作并生成可追溯的子版本 |
 
 审核动作包括 `rename_operation`、`set_component_quantity`、`confirm_capability`、`add_transition` 和 `confirm_fact`。每项都携带 `note`，并按动作接受实体标识、数值或流转条件。模型结构、基础快照和操作来源随版本保存。详情接口的 `metadata.extraction_status` 和会话消息的 `partial` 状态可以分别反映覆盖与验证情况。
+
+Schema 2.1 的版本 JSON 增加工序信息流、定性约束的关联参数及拓扑层级。已有版本接口和模板字段继续可用。新目录提供 `core_concepts`、`core_relations` 和 `instance_concepts`，由前端用于解释端点与筛选核心关系。

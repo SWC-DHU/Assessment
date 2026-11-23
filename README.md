@@ -19,7 +19,7 @@ npm install
 npm run dev
 ```
 
-浏览器打开 [Assessment](http://localhost:5173)。上传 XLSX、CSV、DOCX、PDF、TXT 或 Markdown，发送一次解析请求。包含明确工序编号、名称和其他已识别列的单份表格可直接生成事实。自然语言及混合资料使用配置的 Provider。切换到旧版自定义 Schema 和本地 Mock 可运行原合成样例。
+浏览器打开 [Assessment](http://localhost:5173)。上传 XLSX、CSV、DOCX、PDF、TXT 或 Markdown，发送一次解析请求。可识别的表格列和明确的数量、节拍及编号表达由后端提取。其余自然语言由配置的 Provider 处理。工作台可检索语义实例、聚焦单道工序、查看校验问题和证据，并导出规范 JSON。切换到旧版自定义 Schema 和本地 Mock 可运行原合成样例。
 
 ## 验证与实验
 

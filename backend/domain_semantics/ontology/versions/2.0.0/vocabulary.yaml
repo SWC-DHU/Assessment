@@ -1,0 +1,65 @@
+version: 2.0.0
+concepts:
+  Product: [产品, 组件]
+  Operation: [工序, 工艺步骤, 生产工序]
+  Material: [物料, 半成品]
+  Capability: [制造能力, 资源能力]
+  Constraint: [限制, 工艺约束]
+  ProcessRelation: [工艺关系, 工序关系]
+operations:
+  清洗: [清洗工序, 清洗作业, cleaning operation]
+  激光清洗: [激光清洗工序, laser cleaning operation]
+  堆叠: [堆叠作业, 堆叠工序, stacking operation]
+  装配: [装配工序, 装配作业, assembly operation]
+  检测: [检测工序, 检验作业, inspection operation]
+  包装: [包装工序, 包装作业, packaging operation]
+capabilities:
+  FEED: [供料, 上料, 电芯供料, feeding]
+  GRIP: [抓取, gripping]
+  POSITION: [定位, 精确定位, precise positioning, positioning]
+  CLEAN: [清洗, 表面清洁, cleaning]
+  LASER_CLEAN: [激光清洗, laser cleaning]
+  ADHESIVE_APPLY: [贴胶, 涂胶, 施胶, 贴附胶, adhesive application]
+  INSPECT: [检测, 终检, EOL检测, inspection]
+  CODE_READ: [读码, 身份码读取, code reading]
+  CODE_MARK: [打码, marking]
+  ASSEMBLE: [装配, 组装, 总装, assembly]
+  STACK: [堆叠, 机械堆叠, stacking]
+  TRANSPORT: [输送, 移载, 转运, transport]
+  FASTEN: [固定, 捆扎, fastening]
+  WELD: [焊接, 激光焊接, welding]
+  MACHINE: [加工, CNC加工, machining]
+  PACKAGE: [包装, packaging]
+parameters:
+  process_time:
+    aliases: [单件工时, 工时, 加工时间, process time]
+    units: [ms, s, min, h]
+  wait_time:
+    aliases: [等待时间, 等待时长, wait time]
+    units: [ms, s, min, h]
+  buffer_time:
+    aliases: [缓存时间, 缓冲时间, buffer time]
+    units: [ms, s, min, h]
+  takt_time:
+    aliases: [生产节拍, 整线节拍, 设计下线节拍, 下线节拍, 节拍, takt time]
+    units: [ms, s, min, h]
+  pressure:
+    aliases: [压力, 测试压力, pressure]
+    units: [Pa, kPa, MPa, bar]
+  tolerance:
+    aliases: [公差, 位置公差, tolerance]
+    units: [mm, um, m]
+  temperature:
+    aliases: [温度, temperature]
+    units: [°C, K]
+unit_aliases:
+  秒: s
+  秒钟: s
+  分钟: min
+  毫秒: ms
+  小时: h
+  毫米: mm
+  微米: um
+  μm: um
+  Mpa: MPa
+  ℃: °C

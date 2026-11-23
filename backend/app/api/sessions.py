@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from collections import deque
 from contextlib import contextmanager, suppress
 from pathlib import Path
@@ -46,7 +47,7 @@ from domain_semantics.pipeline import timestamp, trace
 from domain_semantics.projection import template_context
 from domain_semantics.schema import SemanticModel
 from app.services.source_inputs import uploaded_document
-from domain_semantics.sources import message_document
+from domain_semantics.sources import digest, message_document
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -159,7 +160,7 @@ async def upload_files(
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
 ) -> list[UploadedFile]:
-    _get_session_or_404(db, session_id)
+    session = _get_session_or_404(db, session_id)
     session_dir = settings.upload_path / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
 
@@ -173,7 +174,25 @@ async def upload_files(
         documents.append((Path(upload.filename or "untitled.txt").name, raw))
 
     saved_records: list[UploadedFile] = []
+    existing = {(row.filename, row.file_size): [] for row in session.files}
+    for row in session.files:
+        existing[row.filename, row.file_size].append(row)
+    received = {}
     for safe_name, raw in documents:
+        fingerprint = (safe_name, hashlib.sha256(raw).digest())
+        if fingerprint in received:
+            continue
+        for row in existing.get((safe_name, len(raw)), []):
+            try:
+                stored = await run_in_threadpool(Path(row.stored_path).read_bytes)
+            except OSError:
+                continue
+            if raw == stored:
+                received[fingerprint] = row
+                saved_records.append(row)
+                break
+        if fingerprint in received:
+            continue
         unique_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
         dest = session_dir / unique_name
         await run_in_threadpool(dest.write_bytes, raw)
@@ -191,6 +210,7 @@ async def upload_files(
             parsed_preview=parsed.parsed_preview,
         )
         db.add(record)
+        received[fingerprint] = record
         saved_records.append(record)
 
     db.commit()
@@ -420,7 +440,12 @@ async def _execute_extraction_turn(
             result.debug_info.get("error_code"),
         )]
     else:
-        documents = await run_in_threadpool(lambda: [uploaded_document(f) for f in good_files])
+        processed = (set(base.metadata.processed_source_ids) if base and base.metadata else set())
+        source_digests = {source.document_id: source.content_sha256 for source in base.source_refs} if base else {}
+        documents = await run_in_threadpool(lambda: [
+            uploaded_document(file, expand=file.id not in processed or source_digests.get(file.id) != digest(file.parsed_text))
+            for file in good_files
+        ])
         db.rollback()
         progress = run_progress.get((session_id, run_token))
         model, result = await _while_connected(execute(

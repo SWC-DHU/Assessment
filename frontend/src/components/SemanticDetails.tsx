@@ -15,7 +15,7 @@ export function ReviewPill({ state }: { state: string }) {
   return <span className="review-pill" data-state={state}>{statusLabels[state] || state}</span>;
 }
 
-function location(cite: Evidence) {
+export function evidenceLocation(cite: Evidence) {
   const loc = cite.location;
   const parts = [loc.sheet, loc.cell, loc.page != null ? `第 ${loc.page} 页` : null,
     loc.line != null ? `第 ${loc.line} 行` : null, loc.paragraph != null ? `段落 ${loc.paragraph}` : null,
@@ -36,7 +36,7 @@ export function Citations({ model, items, onSource }: {
           {source?.kind === "file"
             ? <button type="button" className="text-action" onClick={() => onSource(cite.document_id)}>{source.name}</button>
             : source?.name || cite.document_id}
-          <span>{location(cite)}</span>
+          <span>{evidenceLocation(cite)}</span>
           <span>{{ structured: "表格提取", llm: "模型候选", rule: "规则提取", manual: "人工确认", legacy: "历史来源" }[cite.method ?? "legacy"]}</span>
           <ReviewPill state={cite.status === "verified" ? "located" : cite.status} />
         </figcaption>
@@ -93,24 +93,34 @@ export function EntityDetail({ model, selected, onSelect, onSource, onClose, onE
   const relations = model.relations.filter((edge) => edge.source_id === selected.id || edge.target_id === selected.id);
   const relationTypes = [...new Set(relations.map(({ type }) => type))];
   const displayed = relations.filter((edge) => !kind || edge.type === kind);
+  const target = selected.target_id ? lookup.get(selected.target_id) : undefined;
+  const baseMaterial = selected.material_id ? lookup.get(selected.material_id) : undefined;
   const fields = [
-    ["实体标识", selected.id], ["语义类型", conceptLabel(selected.concept)], ["工序编号", selected.number],
+    ["语义类型", conceptLabel(selected.concept)], ["工序编号", selected.number],
     ["标准术语", selected.standard_term], ["映射依据", selected.mapping_basis],
-    ["基础物料", selected.material_id ? lookup.get(selected.material_id)?.name : null],
     ["输入状态", selected.input_state_ids?.map((id) => lookup.get(id)?.name).filter(Boolean).join("、")],
     ["输出状态", selected.output_state_ids?.map((id) => lookup.get(id)?.name).filter(Boolean).join("、")],
     ["工序类型", selected.operation_type], ["产品图号", selected.part_number], ["原始能力描述", selected.raw_names?.join("；")], ["设备要求", selected.equipment_requirement],
     ["能力编码", selected.code === selected.standard_term ? null : selected.code], ["映射候选", selected.candidates?.join("、")], ["物料类型", selected.material_type],
-    ["参数编码", selected.parameter_code], ["比较符", selected.comparator],
+    ["要求类型", selected.constraint_type && ({ quality: "质量要求", condition: "工艺条件", numeric: "数值约束",
+      process_time: "单件工时", wait_time: "等待时间", buffer_time: "缓存时间", takt_time: "生产节拍",
+      quantity: "数量约束", general: "一般约束" }[selected.constraint_type] ?? selected.constraint_type)],
+    ["参数编码", selected.parameter_code || selected.related_parameter_codes?.join("、")], ["比较符", selected.comparator],
     ["数值", selected.value == null ? null : String(selected.value)],
     ["上下限", selected.lower != null || selected.upper != null ? `${selected.lower ?? "—"} – ${selected.upper ?? "—"}` : null],
     ["单位", selected.unit], ["计量基准", selected.basis], ["约束说明", selected.description],
   ].filter(([, value]) => value != null && value !== "");
   const overview = <dl className="fact-grid">
     {fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+    {target && <div><dt>约束对象</dt><dd><button className="text-action" type="button" onClick={() => onSelect(target.id)}>{entityTitle(target)}</button></dd></div>}
+    {baseMaterial && <div><dt>基础物料</dt><dd><button className="text-action" type="button" onClick={() => onSelect(baseMaterial.id)}>{entityTitle(baseMaterial)}</button></dd></div>}
+    {!!selected.information_flows?.length && <div><dt>工序信息流</dt><dd>{selected.information_flows.map((flow) =>
+      <p key={flow.direction + flow.name}>{flow.direction === "input" ? "输入" : "输出"} · {flow.name}</p>)}</dd></div>}
   </dl>;
   const evidence = <>
     <Citations model={model} items={[...selected.evidence, ...(selected.equipment_evidence ?? [])]} onSource={onSource} />
+    {selected.information_flows?.map((flow) => <section key={flow.direction + flow.name}><h4>{flow.name}</h4>
+      <Citations model={model} items={flow.evidence} onSource={onSource} /></section>)}
     {!!selected.review_evidence?.length && <><h4>人工审核依据</h4><Citations model={model} items={selected.review_evidence} onSource={onSource} /></>}
   </>;
   const facts = relations.length ? <>

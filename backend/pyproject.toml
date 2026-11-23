@@ -22,6 +22,7 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "rdflib>=7.1",
     "PyYAML>=6.0",
+    "networkx>=3.4,<4",
 ]
 
 [project.optional-dependencies]

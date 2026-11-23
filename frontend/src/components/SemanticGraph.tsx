@@ -68,17 +68,24 @@ export function SemanticGraph({ entities, relations, focus, kind, selectedEntity
     if (!dimensions.width || !dimensions.height) return;
     const target = focus ? graph.points.get(focus) : undefined;
     if (!target) fit(graph.points, width, height);
-    else if (graph.points.size <= 3 && dimensions.height < 320) fit(graph.points, width, height);
+    else if (compact && dimensions.height < 345) {
+      const neighbor = [...graph.points].filter(([id]) => id !== focus).sort(([, a], [, b]) =>
+        Math.hypot(a.x - target.x, a.y - target.y) - Math.hypot(b.x - target.x, b.y - target.y))[0];
+      fit(new Map([[focus!, target], ...(neighbor ? [neighbor] : [])]), width, height);
+    }
     else frameNode(target, width, height, "locate");
-  }, [focus, graph, dimensions.width > 0, dimensions.height > 0, frameNode, fit]);
+  }, [focus, graph, compact, dimensions.width > 0, dimensions.height > 0, frameNode, fit]);
 
   // Revealing a selected item on resize keeps the user's camera position whenever it still fits.
   useLayoutEffect(() => {
     if (!detailOpen || !dimensions.width || !dimensions.height) return;
-    if (points.size <= 3 && dimensions.height < 320 && focus) fit(points, width, height);
+    if (compact && dimensions.height < 345 && activePath) {
+      fit(new Map([[activePath.source, points.get(activePath.source)!], [activePath.target, points.get(activePath.target)!]]), width, height);
+    }
+    else if (points.size <= 3 && dimensions.height < 320 && focus) fit(points, width, height);
     else if (activePoint) frameNode(activePoint, 0, 0, "reveal");
     else if (displayedSelection) frameNode(displayedSelection, width, height, "reveal");
-  }, [detailOpen, dimensions, selectedEntity, activePath?.key, frameNode, fit]);
+  }, [detailOpen, dimensions, compact, selectedEntity, activePath?.key, frameNode, fit]);
 
   const focusPoint = focus ? points.get(focus) : undefined;
   const frame = () => {

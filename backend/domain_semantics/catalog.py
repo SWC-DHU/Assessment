@@ -10,14 +10,24 @@ import yaml
 ROOT = Path(__file__).resolve().parent
 MANUFACTURING_IRI = URIRef("https://assessment.example.org/ontology/manufacturing")
 M = Namespace(f"{MANUFACTURING_IRI}#")
-ONTOLOGY_VERSION = "2.0.0"
+ONTOLOGY_VERSION = "3.0.0"
+HISTORICAL_VERSIONS = ("1.0.0", "2.0.0")
+CORE_CONCEPTS = ("Product", "Material", "Operation", "CapabilityRequirement", "Constraint", "Objective")
+CORE_RELATIONS = ("hasComponent", "hasPredecessor", "consumes", "produces", "requiresCapability", "appliesTo")
+
+
+def ontology_concept(concept: str, version: str = ONTOLOGY_VERSION) -> str:
+    # The JSON contract preserves the historical discriminator.
+    if concept == "Capability" and version == ONTOLOGY_VERSION:
+        return "CapabilityRequirement"
+    return concept
 
 
 @lru_cache
 def load_ontology(version: str = ONTOLOGY_VERSION) -> Graph:
     base = ROOT / "ontology"
     if version != ONTOLOGY_VERSION:
-        if version != "1.0.0":
+        if version not in HISTORICAL_VERSIONS:
             raise KeyError(version)
         base = base / "versions" / version
     graph = Graph()
@@ -66,6 +76,7 @@ def term_details(graph: Graph, node) -> dict:
     }
 
 
+@lru_cache
 def ontology_metadata(version: str = ONTOLOGY_VERSION) -> dict:
     graph = load_ontology(version)
     classes = sorted((node for node in graph.subjects(RDF.type, OWL.Class) if node in M), key=str)
@@ -77,7 +88,10 @@ def ontology_metadata(version: str = ONTOLOGY_VERSION) -> dict:
         "namespace": str(M),
         "ontology_version": str(graph.value(MANUFACTURING_IRI, OWL.versionInfo)),
         "version_iri": str(graph.value(MANUFACTURING_IRI, OWL.versionIRI)),
-        "available_versions": ["1.0.0", ONTOLOGY_VERSION],
+        "available_versions": [*HISTORICAL_VERSIONS, ONTOLOGY_VERSION],
+        "core_concepts": [concept for concept in CORE_CONCEPTS if M[concept] in classes],
+        "core_relations": [relation for relation in CORE_RELATIONS if M[relation] in relations],
+        "instance_concepts": {"Capability": ontology_concept("Capability", version)},
         "concepts": [term_id(node) for node in classes],
         "relations": [term_id(node) for node in relations],
         "classes": [term_details(graph, node) for node in classes],
@@ -94,7 +108,8 @@ def check_ontology() -> None:
     metadata = ontology_metadata()
     classes = set(metadata["concepts"])
     signatures = relation_signatures()
-    if (metadata["ontology_version"] != ONTOLOGY_VERSION or set(signatures) != set(get_args(RelationKind))
+    if (metadata["ontology_version"] != ONTOLOGY_VERSION or not set(CORE_CONCEPTS) <= classes
+            or set(signatures) != set(get_args(RelationKind))
             or any(not domain or not range_ or not (domain | range_) <= classes for domain, range_ in signatures.values())):
         raise RuntimeError("OWL 关系与语义 Schema 的端点契约不一致")
 
@@ -153,7 +168,7 @@ def capability_terms(phrase: str) -> list[str]:
         for hit in re.finditer(pattern, phrase):
             before, after = phrase[:hit.start()], phrase[hit.end():]
             if (re.search(r"(?:待|已|避免|不得|禁止|无需|不需要)$", before)
-                    or (re.match(r"后|前|组件|产物", after) and before)):
+                    or re.match(r"后|前|组件|产物", after)):
                 continue
             indexes = set(range(*hit.span()))
             if not indexes & occupied:

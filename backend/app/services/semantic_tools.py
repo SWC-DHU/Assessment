@@ -1,11 +1,11 @@
 """The agent owns the allowlisted tool execution and trace. Provider text is data."""
-from time import perf_counter
 from typing import Callable
 
 from domain_semantics.pipeline import timestamp, trace
 
 TOOL_CATALOG = {
     "parse_document": ("选中的已上传文档或消息", "工作表、原文来源区段和待抽取批次"),
+    "deterministic_extraction": ("可识别表格列和明确文本表达", "带原文证据的工序、实体及约束"),
     "extract_facts": ("单个有界来源批次与候选约束", "候选 JSON、结束原因和实际用量"),
     "query_ontology": ("本体版本及可选术语", "RDF 类、属性、端点和词表"),
     "normalize_term": ("词表类别与原始术语", "候选、标准术语及映射依据"),
@@ -43,5 +43,10 @@ class ToolTrace:
         except Exception as exc:
             self.end(entry, "error", code=type(exc).__name__)
             raise
-        self.end(entry)
+        result = None
+        if stage == "build_process_graph":
+            result = f"{len(output.nodes)} 道工序 · {len(output.edges)} 条拓扑边"
+        elif stage == "validate_semantics":
+            result = f"{len(output.validation.issues)} 项语义诊断"
+        self.end(entry, summary=result)
         return output

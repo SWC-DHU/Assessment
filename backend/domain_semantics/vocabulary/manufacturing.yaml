@@ -1,11 +1,11 @@
-version: 2.0.0
+version: 3.0.0
 concepts:
   Product: [产品, 组件]
   Operation: [工序, 工艺步骤, 生产工序]
   Material: [物料, 半成品]
-  Capability: [制造能力, 资源能力]
+  CapabilityRequirement: [Capability, 制造能力, 资源能力, 能力需求]
   Constraint: [限制, 工艺约束]
-  ProcessRelation: [工艺关系, 工序关系]
+  Objective: [目标, 建模目标]
 operations:
   清洗: [清洗工序, 清洗作业, cleaning operation]
   激光清洗: [激光清洗工序, laser cleaning operation]
@@ -23,13 +23,43 @@ capabilities:
   INSPECT: [检测, 终检, EOL检测, inspection]
   CODE_READ: [读码, 身份码读取, code reading]
   CODE_MARK: [打码, marking]
-  ASSEMBLE: [装配, 组装, 总装, assembly]
+  ASSEMBLE: [装配, 组装, 总装, 装入, assembly]
   STACK: [堆叠, 机械堆叠, stacking]
   TRANSPORT: [输送, 移载, 转运, transport]
   FASTEN: [固定, 捆扎, fastening]
   WELD: [焊接, 激光焊接, welding]
   MACHINE: [加工, CNC加工, machining]
   PACKAGE: [包装, packaging]
+information_outputs: [识别信息, 标识信息, 检测信息, 检测结果, 检测报告, 检验数据, 读码结果, 身份码, 追溯信息, 检验记录, 测量数据]
+material_states:
+  prefixes: [不合格, 合格, 待周转, 已定位, 已供给, 来料, 清洗后, 贴胶后, 检测后, 预处理后, 涂胶后, 捆扎后, 激光加工后]
+  suffixes: [来料]
+  modifier_patterns: ['装有[^的]{1,40}的(?P<material>.+)']
+quality_parameters:
+  material_compatibility:
+    label: 物料适配
+    aliases: [适配, 规格匹配, 型号]
+  identification:
+    label: 标识与追溯
+    aliases: [打码, 读码, 标识, 极性]
+  surface_condition:
+    label: 表面状态
+    aliases: [表面, 平整, 翘边, 损伤]
+  assembly_alignment:
+    label: 装配与定位
+    aliases: [装配方向, 到位, 定位, 装配位置, 连接位置, 排列方向]
+  electrical_test:
+    label: 电气检测
+    aliases: [电压, 内阻, 绝缘检测]
+  weld_quality:
+    label: 焊接质量
+    aliases: [焊接, 焊缝]
+  adhesive_placement:
+    label: 施胶与贴附
+    aliases: [涂胶, 贴附, 胶路]
+  material_handling:
+    label: 输送与周转
+    aliases: [输送, 转运, 周转, 回收]
 parameters:
   process_time:
     aliases: [单件工时, 工时, 加工时间, process time]

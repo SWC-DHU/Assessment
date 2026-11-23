@@ -63,7 +63,7 @@ def test_tabular_quotes_and_versions_are_reproducible():
     changed = next(item for item in child.constraints if item.parameter_code == "process_time")
     assert changed.target_id == "operation:02" and changed.value == 45
     assert changed.evidence[0].document_id == "revision"
-    assert all(item.parameter_code is None for item in first.constraints)
+    assert [item.parameter_code for item in first.constraints] == ["surface_condition"]
 
 
 def test_precedence_cycle_identified_without_treating_rework_as_dependency():

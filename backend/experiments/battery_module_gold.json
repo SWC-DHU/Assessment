@@ -1,6 +1,7 @@
 {
   "name": "方形电池模组装配工作簿",
   "sheet": "Sheet1",
+  "information_flows": [["produces", "04", "识别信息"], ["produces", "Z1", "标识信息"]],
   "source_note": "从工艺需求文件.xlsx 的 A:H 列逐行人工转录。物料分隔以单元格原标点为准。制造能力列存原文，标准能力另给出单独可核验的小样。产品结构、设备资产、单件工时和整线定量节拍缺少明确来源，评价保持未知。工序类型为汇合时，直接依赖仍逐条按 G 列记录。",
   "columns": ["number", "operation", "capability_text", "input", "output", "kind", "predecessor", "constraint"],
   "rows": [

@@ -1,4 +1,4 @@
-import { RunProgress } from "./RequirementTools";
+import { RunProgress, RunTimeline } from "./RequirementTools";
 import type { PipelineStage } from "../types";
 import { useRef, useState } from "react";
 import {
@@ -13,7 +13,6 @@ import {
   Play,
   RotateCcw,
   Send,
-  Sparkles,
   Square,
   UploadCloud,
   User,
@@ -46,7 +45,6 @@ interface ChatWorkbenchProps {
   onRerunMessage: (messageId: string) => Promise<void>;
   onClearSession: () => Promise<void>;
   onSelectDebugMessage: (messageId: string) => void;
-  selectedDebugMessageId: string | null;
   onOpenAgentManager?: () => void;
   onOpenResult: (id: string) => void;
   revisionBase?: string;
@@ -54,12 +52,6 @@ interface ChatWorkbenchProps {
   strategy: "semantic" | "legacy";
   onStrategy: (strategy: "semantic" | "legacy") => void;
 }
-
-const PRESET_PROMPTS = [
-  "解析以上资料，抽取全部工序、物料、工时与约束",
-  "把第三道工序的工时改为45秒。",
-  "补充核对是否存在信息缺失或歧义的未知项",
-];
 
 export function ChatWorkbench({
   ready,
@@ -80,7 +72,6 @@ export function ChatWorkbench({
   onRerunMessage,
   onClearSession,
   onSelectDebugMessage,
-  selectedDebugMessageId,
   onOpenAgentManager,
   onOpenResult, revisionBase, onClearRevision, strategy, onStrategy,
 }: ChatWorkbenchProps) {
@@ -106,7 +97,7 @@ export function ChatWorkbench({
   };
 
   const handleSubmit = async () => {
-    if (!ready || isRunning) return;
+    if (!ready || isRunning || isUploading) return;
     if (!input.trim() && pendingFileIds.length === 0 && files.length === 0) return;
     const text = input;
     const fids = pendingFileIds.filter((id) => fileMap.has(id));
@@ -203,19 +194,14 @@ export function ChatWorkbench({
       {/* Messages Stream */}
       <div className="chat-stream flex-1 overflow-y-auto p-4 space-y-4" aria-live="polite">
         {messages.length === 0 ? (
-          <div className="max-w-2xl mx-auto mt-6 space-y-5">
-            <div className="text-center space-y-1.5">
-              <div className="w-11 h-11 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center mx-auto">
-                <Sparkles className="w-5 h-5" />
-              </div>
-              <h2 className="text-base font-bold text-slate-900">
-                从工艺资料开始
-              </h2>
-              <p className="text-xs text-slate-500">
-                上传工艺文件或输入制造需求，再从结果工作区核对工序、依赖和原文。
-              </p>
+          <div className="chat-start">
+            <div className="chat-start-copy">
+              <h2>从工艺资料开始</h2>
+              <p>上传工艺表格或输入制造需求。解析完成后，可逐项核对工序、约束及来源。</p>
+              <button className="chat-start-upload" type="button" onClick={() => fileInputRef.current?.click()}
+                disabled={!ready || isUploading}><UploadCloud size={17} />添加工艺资料</button>
             </div>
-
+            {!!samples.length && <details className="sample-disclosure"><summary>试用示例</summary>
             {/* Built-in Sample Cards */}
             <div className="sample-grid">
               {samples.map((s) => (
@@ -247,6 +233,7 @@ export function ChatWorkbench({
                 </div>
               ))}
             </div>
+            </details>}
           </div>
         ) : (
           messages.map((msg) => {
@@ -254,8 +241,6 @@ export function ChatWorkbench({
             const attachedFiles = (msg.file_ids || [])
               .map((fid) => fileMap.get(fid))
               .filter((f): f is UploadedFile => Boolean(f));
-
-            const isSelectedDebug = selectedDebugMessageId === msg.id;
 
             return (
               <div
@@ -294,29 +279,16 @@ export function ChatWorkbench({
                         <span className="font-semibold text-slate-900">
                           {msg.agent_name || "智能体"}{msg.status === "partial" && <small className="chat-partial">部分完成</small>}
                         </span>
-                        {msg.debug_info?.duration_ms !== undefined && (
-                          <span className="text-[10px] font-mono text-slate-400">
-                            {msg.debug_info.duration_ms} ms
-                          </span>
-                        )}
-                        {msg.debug_info?.usage?.total_tokens ? (
-                          <span className="text-[10px] font-mono text-slate-400">
-                            · {msg.debug_info.usage.total_tokens} tok
-                          </span>
-                        ) : null}
                       </div>
 
                       <div className="flex items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => onSelectDebugMessage(msg.id)}
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
-                            isSelectedDebug
-                              ? "bg-indigo-600 text-white"
-                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                          }`}
+                          className="px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-600 hover:bg-slate-100"
+                          title="查看 Debug"
                         >
-                          查看 Debug
+                          诊断
                         </button>
                         {msg.debug_info?.strategy !== "manual_review" && <button
                           type="button"
@@ -370,16 +342,8 @@ export function ChatWorkbench({
                     </div>
                   )}
 
-                  {/* Validation warnings badge */}
-                  {!isUser &&
-                    msg.debug_info?.validation_errors &&
-                    msg.debug_info.validation_errors.length > 0 && (
-                      <div className="mt-2 px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
-                        校验提示：{msg.debug_info.validation_errors[0]}
-                        {msg.debug_info.validation_errors.length > 1 &&
-                          `（共 ${msg.debug_info.validation_errors.length} 条，点击查看 Debug）`}
-                      </div>
-                    )}
+                  {!isUser && <RunTimeline steps={msg.debug_info?.tool_trace?.length
+                    ? msg.debug_info.tool_trace : msg.debug_info?.pipeline_stages ?? []} />}
                 </div>
 
                 {isUser && (
@@ -395,21 +359,6 @@ export function ChatWorkbench({
 
       {/* Composer */}
       <div className="p-3 bg-white border-t border-slate-200 shrink-0 space-y-2">
-        {/* Preset instruction pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-          <span className="text-[10px] text-slate-400 shrink-0">快捷指令:</span>
-          {PRESET_PROMPTS.map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => setInput(p)}
-              className="px-2 py-0.5 rounded-full bg-slate-100 hover:bg-indigo-50 text-[11px] text-slate-600 hover:text-indigo-700 whitespace-nowrap transition-colors"
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-
         {/* Pending files chips */}
         {pendingFileIds.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
@@ -445,10 +394,13 @@ export function ChatWorkbench({
         )}
 
         <div className="composer-options">
-          <label>抽取策略 <select aria-label="抽取策略" value={strategy} disabled={isRunning} onChange={(event) =>
-            onStrategy(event.target.value === "legacy" ? "legacy" : "semantic")}>
-            <option value="semantic">领域语义</option><option value="legacy">旧版自定义 Schema</option>
-          </select></label>
+          <details className="attachment-picker">
+            <summary>解析选项</summary>
+            <div><label>抽取策略 <select aria-label="抽取策略" value={strategy} disabled={isRunning} onChange={(event) =>
+              onStrategy(event.target.value === "legacy" ? "legacy" : "semantic")}>
+              <option value="semantic">领域语义</option><option value="legacy">旧版自定义 Schema</option>
+            </select></label></div>
+          </details>
           {files.length > 0 && <details className="attachment-picker">
             <summary>{pendingFileIds.length > 0 ? `已引用 ${pendingFileIds.length} 份` : "使用会话文件"}</summary>
             <div>{files.map((file) => <label key={file.id}><input type="checkbox"
@@ -461,6 +413,7 @@ export function ChatWorkbench({
         </div>
         <div className="flex items-end gap-2">
           <input
+            id="workbench-upload"
             ref={fileInputRef}
             type="file"
             multiple
@@ -499,8 +452,8 @@ export function ChatWorkbench({
             }}
             placeholder={
               files.length > 0
-                ? "输入指令或对上一轮结果进行自然语言修订（如：把第三道工序工时改为45秒）… Ctrl/Cmd+Enter 发送"
-                : "粘贴工艺需求文本，或拖拽文件到此处上传… Ctrl/Cmd+Enter 发送"
+                ? "输入补充需求或修订说明，Ctrl / ⌘ + Enter 发送"
+                : "输入工艺需求或拖入文件，Ctrl / ⌘ + Enter 发送"
             }
             className="flex-1 min-w-0 resize-none rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-400 focus:outline-none px-3 py-2 text-xs text-slate-800 leading-relaxed"
           />
@@ -518,11 +471,11 @@ export function ChatWorkbench({
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={!ready || (!input.trim() && pendingFileIds.length === 0 && files.length === 0)}
-              className="send-action px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm transition-colors shrink-0"
+              disabled={!ready || isUploading || (!input.trim() && pendingFileIds.length === 0 && files.length === 0)}
+              className="send-action px-4 py-2.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-colors shrink-0"
             >
               <Send className="w-3.5 h-3.5" />
-              <span>发送测试</span>
+              <span>开始解析</span>
             </button>
           )}
         </div>
