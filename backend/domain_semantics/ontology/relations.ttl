@@ -1,0 +1,16 @@
+@prefix m: <https://assessment.example.org/ontology/manufacturing#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+m:hasComponent a owl:ObjectProperty ; rdfs:domain m:Product ;
+    rdfs:range [ a owl:Class ; owl:unionOf (m:Product m:Material) ] .
+m:hasPredecessor a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation .
+m:consumes a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Material .
+m:produces a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Material .
+m:requiresCapability a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Capability .
+m:appliesTo a owl:ObjectProperty ; rdfs:domain m:Constraint ;
+    rdfs:range [ a owl:Class ; owl:unionOf (m:Product m:Operation m:Capability m:ProductionLine) ] .
+m:branchesTo a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation .
+m:mergesInto a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation .
+m:reworksTo a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation .
+m:conditionallyPrecedes a owl:ObjectProperty ; rdfs:domain m:Operation ; rdfs:range m:Operation .

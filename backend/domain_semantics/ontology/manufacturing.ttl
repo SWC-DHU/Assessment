@@ -1,0 +1,15 @@
+@prefix m: <https://assessment.example.org/ontology/manufacturing#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<https://assessment.example.org/ontology/manufacturing> a owl:Ontology ;
+    owl:versionInfo "1.0.0" ;
+    owl:versionIRI <https://assessment.example.org/ontology/manufacturing/1.0.0> .
+
+m:Product a owl:Class ; rdfs:label "产品"@zh .
+m:Operation a owl:Class ; rdfs:label "工序"@zh .
+m:Material a owl:Class ; rdfs:label "物料"@zh .
+m:Capability a owl:Class ; rdfs:label "制造能力需求"@zh .
+m:Constraint a owl:Class ; rdfs:label "约束"@zh .
+m:ProcessRelation a owl:Class ; rdfs:label "语义关系实例"@zh .
+m:ProductionLine a owl:Class ; rdfs:label "生产线"@zh .

@@ -1,0 +1,336 @@
+export interface SchemaFieldDef {
+  name: string;
+  type: "string" | "number" | "boolean" | "array" | "object";
+  description: string;
+  required: boolean;
+  children: SchemaFieldDef[];
+}
+
+export interface ExtractionSchemaConfig {
+  mode: "visual" | "json_schema";
+  fields: SchemaFieldDef[];
+  json_schema: Record<string, unknown>;
+}
+
+export interface AgentExecutionConfig {
+  timeout_seconds: number | null;
+  request_budget: number | null;
+  llm_disambiguation: boolean;
+}
+
+export interface AgentProfile {
+  execution: AgentExecutionConfig;
+  id: string;
+  name: string;
+  description: string;
+  base_url: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  json_mode: boolean;
+  require_source_quote: boolean;
+  system_prompt: string;
+  business_rules: string;
+  extraction_schema: ExtractionSchemaConfig;
+  api_key_masked: string;
+  has_custom_api_key: boolean;
+  using_env_api_key: boolean;
+  effective_base_url: string;
+  effective_model: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentProfilePayload {
+  execution?: AgentExecutionConfig;
+  name: string;
+  description: string;
+  base_url: string;
+  api_key?: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  json_mode: boolean;
+  require_source_quote: boolean;
+  system_prompt: string;
+  business_rules: string;
+  extraction_schema: ExtractionSchemaConfig;
+}
+
+export interface TableColumnMapping {
+  header: string;
+  path: string;
+  fallback: string;
+}
+
+export interface TableConfig {
+  row_source_path: string;
+  columns: TableColumnMapping[];
+  include_summary_sheet: boolean;
+}
+
+export interface OutputTemplate {
+  version: number;
+  schema_version: string;
+  id: string;
+  name: string;
+  description: string;
+  template_type: "jinja2" | "table_mapping";
+  format: "markdown" | "html" | "text" | "table";
+  jinja_content: string;
+  table_config: TableConfig;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OutputTemplatePayload {
+  name: string;
+  description: string;
+  template_type: "jinja2" | "table_mapping";
+  format: "markdown" | "html" | "text" | "table";
+  jinja_content: string;
+  table_config: TableConfig;
+}
+
+export interface TemplatePreviewResponse {
+  template_id: string;
+  template_type: string;
+  format: string;
+  rendered_text: string;
+  table_headers: string[];
+  table_rows: string[][];
+  cell_states?: string[][];
+  mapping_issues?: string[];
+  row_ids?: (string | null)[];
+  error?: string | null;
+}
+
+export interface UploadedFile {
+  id: string;
+  session_id: string;
+  filename: string;
+  file_ext: string;
+  file_size: number;
+  parse_status: "success" | "error";
+  parse_error?: string | null;
+  parsed_text: string;
+  parsed_preview: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface DebugInfo {
+  pipeline_stages?: PipelineStage[];
+  error_code?: string;
+  finish_reason?: string | null;
+  requested_model?: string;
+  request_count?: number;
+  request_budget?: number;
+  prompt_version?: string;
+  provider_attempts?: unknown[];
+  input_digest?: string;
+  activation_note?: string;
+  system_prompt?: string;
+  user_content?: string;
+  raw_response?: string;
+  validation_errors?: string[];
+  duration_ms?: number;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+  model_used?: string;
+  base_url?: string;
+  error_message?: string | null;
+}
+
+export interface ChatMessage {
+  id: string;
+  session_id: string;
+  role: "user" | "assistant";
+  content: string;
+  file_ids: string[];
+  agent_id?: string | null;
+  agent_name?: string | null;
+  status: "success" | "error";
+  extracted_json?: Record<string, unknown> | null;
+  debug_info?: DebugInfo | null;
+  created_at: string;
+}
+
+export interface TestSessionSummary {
+  id: string;
+  title: string;
+  agent_id?: string | null;
+  template_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TestSessionDetail extends TestSessionSummary {
+  current_extracted_json?: Record<string, unknown> | null;
+  files: UploadedFile[];
+  messages: ChatMessage[];
+}
+
+export interface RunChatResponse {
+  user_message: ChatMessage;
+  assistant_message: ChatMessage;
+  current_extracted_json?: Record<string, unknown> | null;
+  template_preview?: TemplatePreviewResponse | null;
+}
+
+export interface SampleDataset {
+  id: string;
+  title: string;
+  description: string;
+  kind: "text" | "csv";
+  filename?: string | null;
+  content: string;
+}
+
+export interface AgentConnectionTestPayload {
+  agent_id?: string | null;
+  base_url: string;
+  api_key?: string;
+  clear_api_key?: boolean;
+  model: string;
+  json_mode?: boolean;
+}
+
+export interface AgentConnectionTestResponse {
+  error_code?: string | null;
+  ok: boolean;
+  message: string;
+  latency_ms: number;
+  status_code?: number | null;
+  effective_base_url: string;
+  effective_model: string;
+  json_mode_supported?: boolean | null;
+  available_models: string[];
+}
+
+export interface AgentModelsResponse {
+  models: string[];
+  effective_base_url: string;
+  error?: string | null;
+}
+
+export interface EnvStatus {
+  has_default_api_key: boolean;
+  default_base_url: string;
+  default_model: string;
+}
+
+export type ReviewState = "verified" | "pending" | "conflict" | "invalid" | "unprocessed";
+export type SemanticGroup = "products" | "operations" | "materials" | "capabilities" | "constraints";
+
+export interface Evidence {
+  document_id: string;
+  fragment_id: string;
+  quote: string;
+  location: {
+    sheet?: string | null;
+    row?: number | null;
+    cell?: string | null;
+    page?: number | null;
+    line?: number | null;
+    paragraph?: number | null;
+    message_id?: string | null;
+    start?: number | null;
+    end?: number | null;
+  };
+  extraction_batch: string;
+  status: ReviewState;
+}
+
+export interface SemanticEntity {
+  id: string;
+  name: string;
+  concept: string;
+  status: ReviewState;
+  evidence: Evidence[];
+  number?: string | null;
+  operation_type?: string | null;
+  predecessor_ids?: string[];
+  input_material_ids?: string[];
+  output_material_ids?: string[];
+  capability_ids?: string[];
+  constraint_ids?: string[];
+  component_ids?: string[];
+  quantity?: number | null;
+  part_number?: string | null;
+  raw_names?: string[];
+  equipment_requirement?: string | null;
+  equipment_evidence?: Evidence[];
+  code?: string | null;
+  mapping?: string;
+  candidates?: string[];
+  operation_ids?: string[];
+  parameter_constraint_ids?: string[];
+  consumed_by?: string[];
+  produced_by?: string[];
+  material_type?: string | null;
+  target_id?: string | null;
+  parameter_code?: string | null;
+  comparator?: string | null;
+  value?: number | null;
+  lower?: number | null;
+  upper?: number | null;
+  unit?: string | null;
+  basis?: string | null;
+  description?: string | null;
+}
+
+export interface SemanticRelation {
+  id: string;
+  type: string;
+  source_id: string;
+  target_id: string;
+  condition?: string | null;
+  max_iterations?: number | null;
+  evidence: Evidence[];
+  status: ReviewState;
+}
+
+export interface SemanticIssue {
+  code: string;
+  message: string;
+  path: string;
+  status: ReviewState;
+}
+
+export interface SemanticModel extends Record<SemanticGroup, SemanticEntity[]> {
+  schema_version: string;
+  ontology_version: string;
+  vocabulary_version: string;
+  run_id: string;
+  parent_version_id: string | null;
+  content_digest: string;
+  input_digest: string;
+  source_refs: { document_id: string; name: string; kind: string }[];
+  relations: SemanticRelation[];
+  unresolved_items: SemanticIssue[];
+  validation: { status: ReviewState; issues: SemanticIssue[] };
+}
+
+export interface SemanticVersion {
+  id: string;
+  created_at: string;
+  status: ReviewState;
+  parent_version_id: string | null;
+}
+
+export interface PipelineStage {
+  stage: string;
+  status: string;
+  summary: string;
+  started_at?: string;
+  ended_at?: string;
+  duration_ms?: number;
+  error_code?: string | null;
+}
+
+export function semanticFrom(data: Record<string, unknown> | null | undefined) {
+  return (data?.semantic as SemanticModel | undefined) ?? null;
+}

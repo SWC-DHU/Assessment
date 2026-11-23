@@ -1,0 +1,165 @@
+{
+  "created_at": "2026-11-23T03:19:35.018935+00:00",
+  "input": "合成三步装配场景",
+  "input_digest": "3766fcd9fac35adc4d66971b6baf9af6910aa254e56b2bf01cbe878b0ec8ffc4",
+  "gold_digest": "073d384f0b426b25dddff1bc7d30b0c82f8cb8139353d8e1a3c1d12db78ae2d4",
+  "configuration": {
+    "provider": "https://api.3stooges.chat/v1",
+    "model": "deepseek-v4.1-flash",
+    "temperature": 0.0,
+    "max_tokens": 2400,
+    "timeout_s": 60,
+    "request_budget": 1,
+    "json_mode": true,
+    "offline": false,
+    "prompt_version": "1.0.0",
+    "schema_version": "1.0.0",
+    "ontology_version": "1.0.0",
+    "vocabulary_version": "1.0.0"
+  },
+  "runs": [
+    {
+      "method": "A",
+      "trial": 1,
+      "status": "error",
+      "elapsed_ms": 30402.75,
+      "calls": 1,
+      "usage": {
+        "prompt_tokens": 358,
+        "completion_tokens": 2400,
+        "total_tokens": 2758
+      },
+      "response_model": "deepseek-v4.1-flash",
+      "error_code": "invalid_json",
+      "metrics": {
+        "operation_entity": {
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "true_positive": 0,
+          "expected": 3,
+          "observed": 0
+        },
+        "process_relations": {
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "true_positive": 0,
+          "expected": 9,
+          "observed": 0
+        },
+        "numeric_constraints": {
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "true_positive": 0,
+          "expected": 1,
+          "observed": 0
+        },
+        "mapping_accuracy": null,
+        "mapping_coverage": 0.0,
+        "evidence_accuracy": null,
+        "unsupported_fact_fraction": null,
+        "schema_valid": false,
+        "topology_completeness": 0.0
+      }
+    },
+    {
+      "method": "B",
+      "trial": 1,
+      "status": "error",
+      "elapsed_ms": 36862.75,
+      "calls": 1,
+      "usage": {
+        "prompt_tokens": 1775,
+        "completion_tokens": 2400,
+        "total_tokens": 4175
+      },
+      "response_model": "deepseek-v4.1-flash",
+      "error_code": "invalid_json",
+      "metrics": {
+        "operation_entity": {
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "true_positive": 0,
+          "expected": 3,
+          "observed": 0
+        },
+        "process_relations": {
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "true_positive": 0,
+          "expected": 9,
+          "observed": 0
+        },
+        "numeric_constraints": {
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "true_positive": 0,
+          "expected": 1,
+          "observed": 0
+        },
+        "mapping_accuracy": null,
+        "mapping_coverage": 0.0,
+        "evidence_accuracy": null,
+        "unsupported_fact_fraction": null,
+        "schema_valid": false,
+        "topology_completeness": 0.0
+      }
+    },
+    {
+      "method": "C",
+      "trial": 1,
+      "status": "error",
+      "elapsed_ms": 31083.5,
+      "calls": 1,
+      "usage": {
+        "completion_tokens": 2400,
+        "prompt_tokens": 1775,
+        "total_tokens": 4175
+      },
+      "response_model": "deepseek-v4.1-flash",
+      "error_code": "invalid_json",
+      "metrics": {
+        "operation_entity": {
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "true_positive": 0,
+          "expected": 3,
+          "observed": 0
+        },
+        "process_relations": {
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "true_positive": 0,
+          "expected": 9,
+          "observed": 0
+        },
+        "numeric_constraints": {
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "true_positive": 0,
+          "expected": 1,
+          "observed": 0
+        },
+        "mapping_accuracy": null,
+        "mapping_coverage": 0.0,
+        "evidence_accuracy": null,
+        "unsupported_fact_fraction": null,
+        "schema_valid": false,
+        "topology_completeness": 0.0
+      }
+    }
+  ],
+  "mean_elapsed_ms": {
+    "C": 31083.5,
+    "B": 36862.75,
+    "A": 30402.75
+  }
+}

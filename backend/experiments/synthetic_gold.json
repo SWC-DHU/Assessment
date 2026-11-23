@@ -1,0 +1,13 @@
+{
+  "name": "合成三步装配场景",
+  "input": "第一道工序为清洗，编号01，消耗坯件，产出清洁件。第二道工序为定位，编号Z1，需要精确定位，消耗夹具，产出已定位件。第三道工序为组装，编号02，前置工序为清洗和定位，消耗清洁件和已定位件，产出成品。整线生产节拍≤120秒/件。",
+  "operations": [["01", "清洗"], ["Z1", "定位"], ["02", "组装"]],
+  "relations": [
+    ["hasPredecessor", "02", "01"], ["hasPredecessor", "02", "Z1"],
+    ["consumes", "01", "坯件"], ["produces", "01", "清洁件"],
+    ["consumes", "Z1", "夹具"], ["produces", "Z1", "已定位件"],
+    ["consumes", "02", "清洁件"], ["consumes", "02", "已定位件"], ["produces", "02", "成品"]
+  ],
+  "mapping_sample": {"精确定位": "POSITION"},
+  "numeric_constraints": [["line", "takt_time", "<=", 120, null, null, "s", "件"]]
+}

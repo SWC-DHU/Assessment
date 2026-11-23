@@ -1,0 +1,219 @@
+{
+  "created_at": "2026-11-23T03:29:49.050685+00:00",
+  "input": "合成单工序与整线节拍",
+  "input_digest": "e86670b27683f749905350d3d40cb78825204dbc70f17770f98b821ae7c3616e",
+  "gold_digest": "0c79c7eca196693bb0012fef29b96e18b36e7e318d93d2108b7769ac94c92cfa",
+  "configuration": {
+    "provider": "https://api.3stooges.chat/v1",
+    "model": "deepseek-v4.1-flash",
+    "temperature": 0.0,
+    "max_tokens": 4096,
+    "timeout_s": 55,
+    "request_budget": 1,
+    "json_mode": true,
+    "offline": false,
+    "prompt_version": "1.0.0",
+    "schema_version": "1.0.0",
+    "ontology_version": "1.0.0",
+    "vocabulary_version": "1.0.0"
+  },
+  "runs": [
+    {
+      "method": "A",
+      "trial": 1,
+      "status": "success",
+      "elapsed_ms": 17000.96,
+      "calls": 1,
+      "usage": {
+        "prompt_tokens": 232,
+        "completion_tokens": 1292,
+        "total_tokens": 1524
+      },
+      "response_model": "deepseek-v4.1-flash",
+      "error_code": null,
+      "prompt_digest": "f85cf15ad7860a9d35890fc0ba69e49da93599cf414ad2cfe92fb53bd6bb004e",
+      "output_digest": "a9b41cb73b167c7685aa65c472018f347385d95ae91d5797b52f3dc3645c641f",
+      "metrics": {
+        "operation_entity": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "true_positive": 1,
+          "expected": 1,
+          "observed": 1
+        },
+        "material_entity": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "product_entity": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "process_relations": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "numeric_constraints": {
+          "precision": null,
+          "recall": 0.0,
+          "f1": 0.0,
+          "true_positive": 0,
+          "expected": 1,
+          "observed": 0
+        },
+        "mapping_accuracy": null,
+        "mapping_coverage": null,
+        "evidence_accuracy": 1.0,
+        "unsupported_fact_fraction": 0.0,
+        "schema_valid": false,
+        "topology_completeness": null
+      }
+    },
+    {
+      "method": "B",
+      "trial": 1,
+      "status": "success",
+      "elapsed_ms": 7485.06,
+      "calls": 1,
+      "usage": {
+        "prompt_tokens": 1749,
+        "completion_tokens": 601,
+        "total_tokens": 2350
+      },
+      "response_model": "deepseek-v4.1-flash",
+      "error_code": null,
+      "prompt_digest": "1aa280f3ae6a975dcef750e981b8f82b1682d310f660a85a3f5d39af03abb953",
+      "output_digest": "41631aecc8bf074857b7f856f680c092eef29ff49becdabbdcf0ba618946531d",
+      "metrics": {
+        "operation_entity": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "true_positive": 1,
+          "expected": 1,
+          "observed": 1
+        },
+        "material_entity": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "product_entity": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "process_relations": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "numeric_constraints": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "true_positive": 1,
+          "expected": 1,
+          "observed": 1
+        },
+        "mapping_accuracy": null,
+        "mapping_coverage": null,
+        "evidence_accuracy": 1.0,
+        "unsupported_fact_fraction": 0.0,
+        "schema_valid": true,
+        "topology_completeness": null
+      }
+    },
+    {
+      "method": "C",
+      "trial": 1,
+      "status": "success",
+      "elapsed_ms": 6039.04,
+      "calls": 1,
+      "usage": {
+        "total_tokens": 2322,
+        "prompt_tokens": 1749,
+        "completion_tokens": 573
+      },
+      "response_model": "deepseek-v4.1-flash",
+      "error_code": null,
+      "prompt_digest": "1aa280f3ae6a975dcef750e981b8f82b1682d310f660a85a3f5d39af03abb953",
+      "output_digest": "a9bdce491fa5a5615fb64fcaecd9b89a69d021456501f0f3c1418bccd94754e6",
+      "metrics": {
+        "operation_entity": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "true_positive": 1,
+          "expected": 1,
+          "observed": 1
+        },
+        "material_entity": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "product_entity": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "process_relations": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "true_positive": 0,
+          "expected": 0,
+          "observed": 0
+        },
+        "numeric_constraints": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "true_positive": 1,
+          "expected": 1,
+          "observed": 1
+        },
+        "mapping_accuracy": null,
+        "mapping_coverage": null,
+        "evidence_accuracy": 1.0,
+        "unsupported_fact_fraction": 0.0,
+        "schema_valid": true,
+        "topology_completeness": null
+      }
+    }
+  ],
+  "mean_elapsed_ms": {
+    "C": 6039.04,
+    "B": 7485.06,
+    "A": 17000.96
+  }
+}

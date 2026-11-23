@@ -1,0 +1,8 @@
+{
+  "name": "合成单工序与整线节拍",
+  "input": "工序01清洗。整线生产节拍≤120秒/件。",
+  "operations": [["01", "清洗"]],
+  "relations": [],
+  "mapping_sample": {},
+  "numeric_constraints": [["line", "takt_time", "<=", 120, null, null, "s", "件"]]
+}
