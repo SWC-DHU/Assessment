@@ -1,0 +1,46 @@
+# Assessment · 工艺需求智能体工作台
+
+Assessment 用于研究制造需求抽取、来源核验、工艺拓扑和模板填充。它包含 FastAPI、Pydantic 2、SQLAlchemy、SQLite 后端，以及 Vite、React 18、TypeScript、Ant Design 6 前端。
+
+## 启动
+
+```sh
+cd backend
+uv venv --python 3.12
+uv pip install -r requirements.txt
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 7878 --reload
+```
+
+已有虚拟环境可跳过 `uv venv`。可选择复制 `backend/.env.example` 为 `backend/.env` 配置默认 Provider，或在智能体面板填写 API 地址、模型和密钥。后端默认使用本地 `playground.db` 和 `uploads/`，启动时补建兼容表；接口文档在 `/docs`。
+
+```sh
+cd frontend
+npm install
+npm run dev
+```
+
+浏览器打开 [Assessment](http://localhost:5173)。上传 XLSX、CSV、DOCX、PDF、TXT 或 Markdown，发送一次解析请求。包含明确工序编号、名称和其他已识别列的单份表格可直接生成事实。自然语言及混合资料使用配置的 Provider。切换到旧版自定义 Schema 和本地 Mock 可运行原合成样例。
+
+## 验证与实验
+
+```sh
+# 从项目根目录执行
+(cd backend && .venv/bin/pytest -q)
+(cd frontend && npm run build)
+```
+
+```sh
+cd backend
+.venv/bin/python -m experiments.run --gold experiments/battery_module_gold.json \
+  --input "uploads/<会话 ID>/<文件名>.xlsx" --methods c --offline
+.venv/bin/python -m experiments.run --gold experiments/synthetic_gold.json \
+  --saved-agent first --methods a,b,c --max-tokens 4096
+```
+
+在线实验会向所选服务发送指定输入。输出记录输入、人工标注和 Prompt 的摘要、模型设置、实际请求及核心评价指标。缺少的度量保留空值。
+
+- [架构](docs/ARCHITECTURE.md)
+- [领域语义](docs/DOMAIN_SEMANTICS.md)
+- [接口](docs/API.md)
+- [测试报告](docs/TEST_REPORT.md)
+- [迁移指南](docs/MIGRATION_GUIDE.md)
