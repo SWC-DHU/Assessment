@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import agents, model_assets, resource_matching, samples, semantics, sessions, templates
 from app.config import settings
 from domain_semantics.catalog import check_ontology
-from app.database import Base, SessionLocal, engine
+from app.database import Base, SessionLocal, engine, ensure_schema_migrations
 from app.services.seed import seed_initial_data
 
 
@@ -14,6 +14,7 @@ async def lifespan(_: FastAPI):
     settings.upload_path.mkdir(parents=True, exist_ok=True)
     check_ontology()
     Base.metadata.create_all(bind=engine)
+    ensure_schema_migrations(engine)
     db = SessionLocal()
     try:
         seed_initial_data(db)

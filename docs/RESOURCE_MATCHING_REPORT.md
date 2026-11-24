@@ -91,4 +91,11 @@ cd backend
 | 干扰资产拦截率 | 0.7941 | **1.0000** |
 | 平均运行耗时 | 57.65 ms | **18.25 ms** |
 
-方法 B（直接 LLM 匹配基线）已完整接入 `experiments/run_matching.py` 与前端/API，配置在线 Provider 后可直接运行 `--methods a,b,c --saved-agent first` 获取三方法完整对照数据。
+方法 B（直接 LLM 匹配基线）与方法 C+LLM（语义消歧与检索策略协同增强）均已完整接入 `experiments/run_matching.py`、后端 API 与前端工作台，配置在线 `resource_matching` Provider 后可直接运行 `--methods a,b,c,c_llm --saved-agent first` 获取完整四模式对照数据。
+
+## 6. 多智能体架构重构与隔离验证（2026-11-24 补充）
+
+- **公共智能体层（`backend/agents/`）**：新增 `registry.py`、`config.py`、`llm_client.py`、`runtime.py`，实现角色注册、强角色校验（禁止跨角色混用或隐式回退）、统一脱敏配置快照、有限调用预算与重试控制。
+- **独立封装与兼容迁移**：新增 `backend/requirement_parsing/` 独立入口与工具/Prompt 声明；SQLite 启动自动执行 `ensure_schema_migrations` 兼容历史数据库并分别初始化 `requirement_parsing` 与 `resource_matching` 默认配置。
+- **LLM 策略协同闭环**：`resource_matching` 新增独立 `prompts/` 模板（v2.0.0）及 `verify_llm_strategy_proposal` 确定性门禁，支持 LLM 参与难例工序消歧、类别检索调整、能力拆分提示与软约束复核，同时强制拦截幻觉资产 ID、禁止绕过三值硬约束，并输出不修改上游需求的结构化诊断反馈 `feedback_items`。
+- **前后端隔离测试**：后端全量测试扩展至 **99 passed, 0 failed**（含角色错配 400 拒绝、SQLite 旧库迁移、防幻觉与硬约束不可绕过、未配置/超时降级与快速失败策略、无明文 Key 泄露）；前端完成顶部工作台按角色切换（模型资产库解耦不绑定智能体）、`AgentManagerModal` 角色分栏与专属策略配置，并通过 Chrome Playwright 隔离实测与原工作台回归。

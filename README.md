@@ -54,7 +54,7 @@ cd backend
 .venv/bin/python -m experiments.run --methods c --offline --repeat 3   --gold experiments/battery_module_gold.json   --expected-overlay experiments/battery_mixed_expectations.json   --input '../test case/工艺需求文件.xlsx'   --text-file '../test case/自然语言建模需求.md'
 ```
 
-### 资源匹配对比实验（方法 A / B / C）
+### 资源匹配对比实验（方法 A / B / C / C+LLM）
 
 ```sh
 cd backend
@@ -62,11 +62,11 @@ cd backend
   --gold experiments/battery_matching_gold.json \
   --input '../test case/工艺需求文件.xlsx' \
   --text-file '../test case/自然语言建模需求.md' \
-  --methods a,c --top-k 3 --repeat 3 --offline
+  --methods a,c,c_llm --top-k 3 --repeat 3 --offline
 ```
 
 - [v2 现状审查](docs/REFACTOR_AUDIT.md)
 - [v2 语义与调用链](docs/REFACTOR_V2.md)
 - [v2 测试与实验报告](docs/REFACTOR_REPORT.md)
 
-正式语义 Schema 2.2 支持带来源的建模任务。结果栏的“下游交接”提供按版本生成的资源匹配输入、诊断、JSON 导出及直达「资源匹配」工作台入口；平台同时提供「模型资产库」（统一 `ModelAsset` 1.0.0 与 59 个 synthetic 虚拟资产）和「资源匹配智能体」（输出 `ResourceMatchingOutput` 1.0.0 供后续关联建模智能体消费）。开发与验证详述见 [交接开发报告](docs/HANDOFF_REPORT.md) 与 [资源匹配开发报告](docs/RESOURCE_MATCHING_REPORT.md)。
+平台采用**多智能体角色隔离架构**：`requirement_parsing`（需求解析智能体）与 `resource_matching`（资源匹配智能体）各自独立管理 LLM 连接、API Key、Prompt、调用预算、专属工具与运行历史；共享 `domain_semantics` 领域本体与 `model_assets` 模型资产库（59 个 synthetic 虚拟资产），通过标准化契约 `ResourceMatchingInput` 1.0.0 与 `ResourceMatchingOutput` 1.0.0 完成交接，并为后续关联建模智能体预留标准下游接口。详述见 [交接开发报告](docs/HANDOFF_REPORT.md) 与 [资源匹配开发报告](docs/RESOURCE_MATCHING_REPORT.md)。

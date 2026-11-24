@@ -1,6 +1,7 @@
 """Resource Matching Agent module (reusable & decoupled for Metatwin migration)."""
-from .agent import run_resource_matching
+from .agent import MatchingExecutionError, run_resource_matching
 from .constraints import build_line_takt_reference, evaluate_asset_constraints
+from .prompts import MATCHING_PROMPT_VERSION, compose_matching_system_prompt, load_matching_prompt, matching_prompt_manifest
 from .ranking import compute_score_breakdown, rank_evaluations
 from .retrieval import dereference_input, retrieve_keyword_candidates, retrieve_semantic_candidates
 from .schema import (
@@ -10,6 +11,9 @@ from .schema import (
     CapabilityPartialCandidates,
     CheckVerdict,
     ConstraintCheckItem,
+    FeedbackSource,
+    LLMMode,
+    LLMStrategyRecord,
     LineConstraintReference,
     MatchingDiagnostic,
     MatchingMethod,
@@ -22,9 +26,10 @@ from .schema import (
     ResourceMatchingOutput,
     ScoreBreakdown,
     ScoringWeights,
+    StructuredFeedbackItem,
     UnmetRequirement,
 )
-from .tools import MATCHING_TOOL_CATALOG, list_matching_tools
+from .tools import MATCHING_TOOL_CATALOG, list_matching_tools, search_assets_by_category, verify_llm_strategy_proposal
 
 __all__ = [
     "AgentTraceStep",
@@ -33,9 +38,14 @@ __all__ = [
     "CapabilityPartialCandidates",
     "CheckVerdict",
     "ConstraintCheckItem",
+    "FeedbackSource",
+    "LLMMode",
+    "LLMStrategyRecord",
     "LineConstraintReference",
+    "MATCHING_PROMPT_VERSION",
     "MATCHING_TOOL_CATALOG",
     "MatchingDiagnostic",
+    "MatchingExecutionError",
     "MatchingMethod",
     "MatchingSummary",
     "OperationMatchStatus",
@@ -46,14 +56,20 @@ __all__ = [
     "ResourceMatchingOutput",
     "ScoreBreakdown",
     "ScoringWeights",
+    "StructuredFeedbackItem",
     "UnmetRequirement",
     "build_line_takt_reference",
+    "compose_matching_system_prompt",
     "compute_score_breakdown",
     "dereference_input",
     "evaluate_asset_constraints",
     "list_matching_tools",
+    "load_matching_prompt",
+    "matching_prompt_manifest",
     "rank_evaluations",
     "retrieve_keyword_candidates",
     "retrieve_semantic_candidates",
     "run_resource_matching",
+    "search_assets_by_category",
+    "verify_llm_strategy_proposal",
 ]

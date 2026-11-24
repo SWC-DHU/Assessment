@@ -34,7 +34,9 @@
 | PATCH | `/api/sessions/{id}` | 旧版 JSON 可编辑。直接改写规范语义返回 409 |
 | POST | `/api/agents/test-connection` | 返回 `error_code`、HTTP 状态、有效模型及诊断 |
 | POST | `/api/agents/probe-json` | 使用草稿配置发送一条合成节拍样例，返回完整 JSON 验证、实际发送上限、结束原因、推理用量与思考开关结果。不会提交会话材料或保存配置 |
-| POST / PATCH | `/api/agents[/{agent_id}]` | 可保存 `execution.timeout_seconds`、`request_budget`、`batch_max_tokens`、`semantic_thinking`、`thinking_parameter` 和 `llm_disambiguation` |
+| POST / PATCH | `/api/agents[/{agent_id}]` | 支持 `agent_type`（`requirement_parsing` / `resource_matching`）隔离管理，`execution` 支持 `timeout_seconds`、`request_budget`、`batch_max_tokens`、`semantic_thinking`、`thinking_parameter`、`llm_disambiguation`、`fallback_policy`、`max_strategy_retries` 与 `default_llm_mode` |
+| GET | `/api/agents?agent_type=…` | 按角色筛选智能体配置；所有响应均脱敏且不返回明文 API Key |
+| GET | `/api/agents/roles` | 查询系统注册的多智能体角色、输入输出契约、Prompt 版本与专属工具目录 |
 | GET | `/api/templates/{template_id}/versions` | 查询自定义模板定义快照 |
 | POST | `/api/templates/{template_id}/preview` | 继续支持 Jinja2 和列映射，表格增加 `cell_states`、`row_ids` 和 `mapping_issues` |
 | POST | `/api/templates/{template_id}/export` | 生成 XLSX、DOCX、Markdown 或 JSON。规范 JSON 建议使用版本下载接口 |
@@ -95,10 +97,11 @@ Schema 2.1 的版本 JSON 增加工序信息流、定性约束的关联参数及
 | 方法 | 路径 | 行为 |
 | --- | --- | --- |
 | GET | `/api/resource-matching/schema` | 返回下游输出契约 `ResourceMatchingOutput` 1.0.0 JSON Schema |
-| GET | `/api/resource-matching/tools` | 读取资源匹配智能体确定性工具目录 |
+| GET | `/api/resource-matching/tools` | 读取资源匹配智能体专属工具目录（含 LLM 策略验证门禁与类别检索工具） |
+| GET | `/api/resource-matching/prompts` | 查询资源匹配智能体独立 Prompt 版本与模板清单 |
 | GET | `/api/resource-matching/mappings` | 读取共享本体中的六项需求↔资源语义对应规则 |
-| POST | `/api/resource-matching/sessions/{session_id}/versions/{version_id}/run` | 直接消费指定语义版本生成的 `ResourceMatchingInput`，执行匹配并可选持久化至 `resource_matching_runs` |
-| POST | `/api/resource-matching/run-direct` | 直接提交 `ResourceMatchingInput` JSON 执行无状态或持久化匹配（便于 Metatwin 独立集成） |
+| POST | `/api/resource-matching/sessions/{session_id}/versions/{version_id}/run` | 强制校验 `agent_id` 属于 `resource_matching`（跨角色返回 HTTP 400）；支持 `llm_mode`（`disabled`/`enhanced`）与 `fallback_policy`（`degrade_deterministic`/`fail_fast`），输出含 `run_metadata` 与非侵入式 `feedback_items` 的 `ResourceMatchingOutput` |
+| POST | `/api/resource-matching/run-direct` | 直接提交 `ResourceMatchingInput` JSON 执行无状态或持久化匹配（强制校验 `resource_matching` 角色，便于 Metatwin 独立集成） |
 | GET | `/api/resource-matching/runs` | 按 `session_id` / `semantic_version_id` 查询历史匹配记录 |
 | GET | `/api/resource-matching/runs/{run_id}` | 读取指定匹配运行的完整 `ResourceMatchingOutput` |
 | GET | `/api/resource-matching/runs/{run_id}/export` | 下载 `resource-matching-output-{run_id}.json` |

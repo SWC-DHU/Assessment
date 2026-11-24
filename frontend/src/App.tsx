@@ -15,6 +15,8 @@ import type {
   AgentConnectionTestResponse,
   AgentProfile,
   AgentProfilePayload,
+  AgentRoleSpec,
+  AgentType,
   EnvStatus,
   Evidence,
   OutputTemplate,
@@ -44,6 +46,15 @@ export default function App() {
   const { message: antdMessage } = AntdApp.useApp();
 
   const [agents, setAgents] = useState<AgentProfile[]>([]);
+  const [roleSpecs, setRoleSpecs] = useState<AgentRoleSpec[]>([]);
+  const [activeMatchingAgentId, setActiveMatchingAgentId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem("assessment.activeMatchingAgentId");
+    } catch {
+      return null;
+    }
+  });
+  const [agentModalRole, setAgentModalRole] = useState<AgentType>("requirement_parsing");
   const [templates, setTemplates] = useState<OutputTemplate[]>([]);
   const [sessions, setSessions] = useState<TestSessionSummary[]>([]);
   const [activeSession, setActiveSession] = useState<TestSessionDetail | null>(null);
@@ -156,17 +167,25 @@ export default function App() {
     let mounted = true;
     (async () => {
       try {
-        const [agentList, tmplList, sessionList, sampleData] = await Promise.all([
+        const [agentList, rolesData, tmplList, sessionList, sampleData] = await Promise.all([
           api.listAgents(),
+          api.listAgentRoles().catch(() => []),
           api.listTemplates(),
           api.listSessions(),
           api.getSamples(),
         ]);
         if (!mounted) return;
         setAgents(agentList);
+        setRoleSpecs(rolesData);
         setTemplates(tmplList);
         setSamples(sampleData.samples);
         setEnvStatus(sampleData.env_status);
+
+        const reqAgents = agentList.filter((a) => (a.agent_type || "requirement_parsing") === "requirement_parsing");
+        const matchAgents = agentList.filter((a) => a.agent_type === "resource_matching");
+        setActiveMatchingAgentId((prev) =>
+          prev && matchAgents.some((a) => a.id === prev) ? prev : matchAgents[0]?.id ?? null
+        );
 
         if (sessionList.length > 0) {
           setSessions(sessionList);
@@ -174,7 +193,7 @@ export default function App() {
         } else {
           const created = await api.createSession({
             title: "新建工艺解析测试",
-            agent_id: agentList[0]?.id ?? null,
+            agent_id: reqAgents[0]?.id ?? null,
             template_id: tmplList[0]?.id ?? null,
           });
           if (!mounted) return;
@@ -191,7 +210,18 @@ export default function App() {
     };
   }, [loadSessionDetail, showError]);
 
-  const activeAgentId = activeSession?.agent_id || agents[0]?.id || null;
+  const requirementAgents = agents.filter((a) => (a.agent_type || "requirement_parsing") === "requirement_parsing");
+  const matchingAgents = agents.filter((a) => a.agent_type === "resource_matching");
+  const activeRequirementAgentId =
+    (activeSession?.agent_id && requirementAgents.some((a) => a.id === activeSession.agent_id)
+      ? activeSession.agent_id
+      : requirementAgents[0]?.id) || null;
+  const resolvedMatchingAgentId =
+    (activeMatchingAgentId && matchingAgents.some((a) => a.id === activeMatchingAgentId)
+      ? activeMatchingAgentId
+      : matchingAgents[0]?.id) || null;
+  const activeMatchingAgent = matchingAgents.find((a) => a.id === resolvedMatchingAgentId) || null;
+  const activeAgentId = activeRequirementAgentId;
   const activeTemplateId = activeSession?.template_id || templates[0]?.id || null;
 
   const refreshSessionsList = async () => {
@@ -199,7 +229,7 @@ export default function App() {
     setSessions(list);
   };
 
-  const handleSelectAgent = async (agentId: string) => {
+  const handleSelectRequirementAgent = async (agentId: string) => {
     if (!activeSession) return;
     try {
       const updated = await api.updateSession(activeSession.id, { agent_id: agentId });
@@ -207,6 +237,20 @@ export default function App() {
     } catch (err) {
       showError(err);
     }
+  };
+
+  const handleSelectMatchingAgent = (agentId: string) => {
+    setActiveMatchingAgentId(agentId);
+    try {
+      localStorage.setItem("assessment.activeMatchingAgentId", agentId);
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  const openAgentManagerFor = (role: AgentType) => {
+    setAgentModalRole(role);
+    setAgentModalOpen(true);
   };
 
   const handleSelectTemplate = async (templateId: string) => {
@@ -532,11 +576,18 @@ export default function App() {
     return dup;
   };
   const handleDeleteAgent = async (id: string) => {
+    const target = agents.find((a) => a.id === id);
     await api.deleteAgent(id);
     const next = agents.filter((a) => a.id !== id);
     setAgents(next);
-    if (activeSession?.agent_id === id && next[0]) {
-      await handleSelectAgent(next[0].id);
+    if (target?.agent_type === "resource_matching") {
+      const nextMatch = next.find((a) => a.agent_type === "resource_matching");
+      if (resolvedMatchingAgentId === id) {
+        handleSelectMatchingAgent(nextMatch?.id ?? "");
+      }
+    } else if (activeSession?.agent_id === id) {
+      const nextReq = next.find((a) => (a.agent_type || "requirement_parsing") === "requirement_parsing");
+      if (nextReq) await handleSelectRequirementAgent(nextReq.id);
     }
   };
 
@@ -569,6 +620,9 @@ export default function App() {
       .find((m) => m.role === "assistant" && m.debug_info) ||
     null;
 
+  const topBarAgents = workspaceMode === "matching" ? matchingAgents : requirementAgents;
+  const topBarActiveAgentId = workspaceMode === "matching" ? resolvedMatchingAgentId : activeRequirementAgentId;
+
   return (
     <div className="assessment-workspace">
       <TopBar
@@ -579,11 +633,14 @@ export default function App() {
             setMatchingTarget({ sessionId: activeSession.id, versionId: versions[0]?.id ?? null });
           }
         }}
-        agents={agents}
-        activeAgentId={activeAgentId}
-        connectionStatus={activeAgentId ? agentConnStatuses[activeAgentId] : undefined}
-        onSelectAgent={handleSelectAgent}
-        onOpenAgentManager={() => setAgentModalOpen(true)}
+        agents={topBarAgents}
+        activeAgentId={topBarActiveAgentId}
+        connectionStatus={topBarActiveAgentId ? agentConnStatuses[topBarActiveAgentId] : undefined}
+        onSelectAgent={(id) => {
+          if (workspaceMode === "matching") handleSelectMatchingAgent(id);
+          else void handleSelectRequirementAgent(id);
+        }}
+        onOpenAgentManager={() => openAgentManagerFor(workspaceMode === "matching" ? "resource_matching" : "requirement_parsing")}
         onOpenTemplateStudio={() => setTemplateModalOpen(true)}
         leftCollapsed={leftCollapsed}
         onToggleLeft={() => { setLeftCollapsed((v) => !v); setArea("files"); }}
@@ -611,7 +668,8 @@ export default function App() {
             sessions={sessions}
             initialSessionId={matchingTarget.sessionId ?? activeSession?.id ?? null}
             initialVersionId={matchingTarget.versionId}
-            activeAgentId={activeAgentId}
+            activeMatchingAgent={activeMatchingAgent}
+            onOpenMatchingAgentConfig={() => openAgentManagerFor("resource_matching")}
             onInspectAsset={(assetId) => {
               setInspectedAssetId(assetId);
               setWorkspaceMode("assets");
@@ -641,7 +699,7 @@ export default function App() {
                 onPreviewFile={setPreviewFile} onSendMessage={handleSendMessage} onAbortRun={handleAbortRun}
                 onRerunMessage={handleRerunMessage} onResumeMessage={(id) => handleRerunMessage(id, true)} onClearSession={handleClearSession}
                 onSelectDebugMessage={(id) => { setSelectedDebugMessageId(id); openResults("debug"); }}
-                onOpenAgentManager={() => setAgentModalOpen(true)}
+                onOpenAgentManager={() => openAgentManagerFor("requirement_parsing")}
                 onOpenResult={(id) => { void handleInspect(id); openResults("overview"); }}
                 revisionBase={revisionBase} onClearRevision={() => setRevisionBase(undefined)}
                 strategy={strategy} onStrategy={setStrategy} />
@@ -685,14 +743,22 @@ export default function App() {
       <AgentManagerModal
         open={agentModalOpen}
         agents={agents}
-        activeAgentId={activeAgentId}
+        roleSpecs={roleSpecs}
+        initialRole={agentModalRole}
+        activeAgentIdsByRole={{
+          requirement_parsing: activeRequirementAgentId,
+          resource_matching: resolvedMatchingAgentId,
+        }}
         envStatus={envStatus}
         onClose={() => setAgentModalOpen(false)}
         onCreateAgent={handleCreateAgent}
         onUpdateAgent={handleUpdateAgent}
         onDuplicateAgent={handleDuplicateAgent}
         onDeleteAgent={handleDeleteAgent}
-        onActivateAgent={handleSelectAgent}
+        onActivateAgent={async (id, role) => {
+          if (role === "resource_matching") handleSelectMatchingAgent(id);
+          else await handleSelectRequirementAgent(id);
+        }}
         onConnectionTested={(agentId, res) =>
           setAgentConnStatuses((prev) => ({ ...prev, [agentId]: res }))
         }

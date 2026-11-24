@@ -8,9 +8,9 @@ import json
 from pathlib import Path
 from time import perf_counter
 
+from agents.config import resolve_agent_runtime
 from app.config import settings
 from app.database import SessionLocal
-from app.models.db_models import AgentProfile
 from app.services.llm_extractor import ExtractorConfig
 from app.services.parser import parse_file_path
 from app.services.redaction import safe_endpoint
@@ -20,6 +20,7 @@ from domain_semantics.sources import digest, file_document, message_document
 from model_assets.catalog import AssetCatalog, get_default_catalog
 from resource_matching.agent import _run_method_b_llm, run_resource_matching
 from resource_matching.constraints import evaluate_asset_constraints
+from resource_matching.prompts import MATCHING_PROMPT_VERSION
 from resource_matching.retrieval import dereference_input, retrieve_keyword_candidates
 from resource_matching.schema import ResourceMatchingConfig, ResourceMatchingOutput
 
@@ -116,23 +117,26 @@ def _score_predictions(
     }
 
 
-def _resolve_llm(args) -> ExtractorConfig | None:
+def _resolve_llm(args):
     if args.offline:
-        return None
+        return None, None
     if args.saved_agent:
         with SessionLocal() as db:
-            agent = db.get(AgentProfile, args.saved_agent) if args.saved_agent != "first" else db.query(AgentProfile).first()
-            if agent:
-                return ExtractorConfig(
-                    base_url=agent.base_url or settings.default_llm_base_url,
-                    api_key=agent.api_key or settings.default_llm_api_key,
-                    model=agent.model or settings.default_llm_model,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    timeout_seconds=args.timeout,
-                    request_budget=1,
-                    json_mode=True,
-                )
+            target_id = None if args.saved_agent == "first" else args.saved_agent
+            _, runtime = resolve_agent_runtime(db, "resource_matching", target_id, default_budget=3, default_timeout=args.timeout)
+            cfg = ExtractorConfig(
+                base_url=runtime.llm_config.base_url,
+                api_key=runtime.llm_config.api_key,
+                model=runtime.llm_config.model,
+                temperature=args.temperature,
+                max_tokens=args.max_tokens,
+                timeout_seconds=args.timeout,
+                request_budget=runtime.llm_config.request_budget,
+                json_mode=True,
+                system_prompt=runtime.llm_config.system_prompt,
+                business_rules=runtime.llm_config.business_rules,
+            )
+            return cfg, runtime
     if settings.default_llm_api_key:
         return ExtractorConfig(
             base_url=settings.default_llm_base_url,
@@ -141,18 +145,18 @@ def _resolve_llm(args) -> ExtractorConfig | None:
             temperature=args.temperature,
             max_tokens=args.max_tokens,
             timeout_seconds=args.timeout,
-            request_budget=1,
+            request_budget=3,
             json_mode=True,
-        )
-    return None
+        ), None
+    return None, None
 
 
 async def run_experiment(args) -> dict:
     gold_text = args.gold.read_text(encoding="utf-8")
     gold = json.loads(gold_text)
     methods = [m.strip().upper() for m in args.methods.split(",") if m.strip()]
-    if set(methods) - {"A", "B", "C"}:
-        raise SystemExit("methods 必须为 A,B,C 的子集")
+    if set(methods) - {"A", "B", "C", "C_LLM"}:
+        raise SystemExit("methods 必须为 A,B,C,C_LLM 的子集")
 
     parsed = parse_file_path(args.input, row_limit=None)
     if parsed.status != "success":
@@ -164,7 +168,7 @@ async def run_experiment(args) -> dict:
     rmi = build_resource_matching_input(semantic)
     catalog = get_default_catalog()
     context = dereference_input(rmi)
-    llm_cfg = _resolve_llm(args)
+    llm_cfg, runtime = _resolve_llm(args)
 
     runs = []
     for trial in range(args.repeat):
@@ -174,24 +178,31 @@ async def run_experiment(args) -> dict:
                     "method": "B",
                     "trial": trial + 1,
                     "status": "skipped",
-                    "reason": "离线或未配置在线 LLM Provider，跳过方法B直接LLM匹配基线",
+                    "reason": "离线或未配置在线 resource_matching LLM Provider，跳过方法B直接LLM匹配基线",
                 })
                 continue
             started = perf_counter()
-            cfg = ResourceMatchingConfig(top_k=args.top_k, method=method, use_llm=(method == "C" and args.use_llm and llm_cfg is not None))
+            base_method = "C" if method == "C_LLM" else method
+            use_enhanced = method == "C_LLM" or (method == "C" and args.use_llm and llm_cfg is not None)
+            cfg = ResourceMatchingConfig(
+                top_k=args.top_k,
+                method=base_method,  # type: ignore[arg-type]
+                llm_mode="enhanced" if use_enhanced else "disabled",
+                use_llm=use_enhanced,
+                fallback_policy="degrade_deterministic",
+            )
             raw_top_k: dict[str, list[dict]] = {}
-            if method == "A":
-                output = await run_resource_matching(rmi, catalog=catalog, config=cfg)
-                # Capture raw lexical Top-k (before constraint filtering) to measure genuine violation rate!
+            if base_method == "A":
+                output = await run_resource_matching(rmi, catalog=catalog, config=cfg, runtime=runtime)
                 for op in context.operations:
                     hits = retrieve_keyword_candidates(op, catalog)[: args.top_k]
                     raw_top_k[op.operation_id] = [
                         {"asset_id": asset.asset_id, "reasons": [f"关键词命中: {', '.join(toks[:5])}"], "checks": []}
                         for asset, _, toks in hits
                     ]
-            elif method == "B":
+            elif base_method == "B":
                 op_results, b_picks, calls, model_used, diags = await _run_method_b_llm(context, catalog, cfg, llm_cfg)
-                output = await run_resource_matching(rmi, catalog=catalog, config=ResourceMatchingConfig(top_k=args.top_k, method="C"))
+                output = await run_resource_matching(rmi, catalog=catalog, config=ResourceMatchingConfig(top_k=args.top_k, method="C"), runtime=runtime)
                 output = output.model_copy(update={"config": cfg, "operation_matches": op_results})
                 for op_id, picks in b_picks.items():
                     raw_top_k[op_id] = [
@@ -199,7 +210,7 @@ async def run_experiment(args) -> dict:
                         for p in picks
                     ]
             else:
-                output = await run_resource_matching(rmi, catalog=catalog, config=cfg, llm_config=llm_cfg)
+                output = await run_resource_matching(rmi, catalog=catalog, config=cfg, llm_config=llm_cfg, runtime=runtime)
                 for op_res in output.operation_matches:
                     raw_top_k[op_res.operation_id] = [
                         {
@@ -217,6 +228,11 @@ async def run_experiment(args) -> dict:
                 "status": output.matching_status,
                 "elapsed_ms": elapsed_ms,
                 "llm_calls": output.summary.llm_calls,
+                "llm_retries": output.summary.llm_retries,
+                "fallback_triggered": output.summary.fallback_triggered,
+                "fallback_reason": output.summary.fallback_reason,
+                "prompt_version": MATCHING_PROMPT_VERSION,
+                "run_metadata": output.run_metadata.model_dump(mode="json") if output.run_metadata else None,
                 "metrics": metrics,
             })
 

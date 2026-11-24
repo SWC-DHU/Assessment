@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from agents.registry import get_role_spec, list_role_specs
+from agents.runtime import AgentType
 from app.config import settings
 from app.database import get_db
 from app.services.redaction import safe_endpoint
@@ -42,6 +44,7 @@ def _to_agent_out(db: Session, agent: AgentProfile) -> AgentProfileOut:
     using_env = not has_custom and bool(settings.default_llm_api_key.strip())
     return AgentProfileOut(
         id=agent.id,
+        agent_type=agent.agent_type or "requirement_parsing",
         execution=agent_execution(db, agent.id),
         name=agent.name,
         description=agent.description,
@@ -64,15 +67,32 @@ def _to_agent_out(db: Session, agent: AgentProfile) -> AgentProfileOut:
     )
 
 
+@router.get("/roles")
+def get_agent_roles() -> list[dict]:
+    return list_role_specs()
+
+
 @router.get("", response_model=list[AgentProfileOut])
-def list_agents(db: Session = Depends(get_db)) -> list[AgentProfileOut]:
-    agents = db.query(AgentProfile).order_by(AgentProfile.created_at.asc()).all()
+def list_agents(agent_type: AgentType | None = None, db: Session = Depends(get_db)) -> list[AgentProfileOut]:
+    query = db.query(AgentProfile)
+    if agent_type is not None:
+        query = query.filter(AgentProfile.agent_type == agent_type)
+    agents = query.order_by(AgentProfile.created_at.asc()).all()
     return [_to_agent_out(db, a) for a in agents]
 
 
 @router.post("", response_model=AgentProfileOut, status_code=status.HTTP_201_CREATED)
 def create_agent(payload: AgentProfileCreate, db: Session = Depends(get_db)) -> AgentProfileOut:
-    agent = AgentProfile(**payload.model_dump(exclude={"execution"}))
+    data = payload.model_dump(exclude={"execution"})
+    role = get_role_spec(payload.agent_type)
+    if not (data.get("system_prompt") or "").strip():
+        data["system_prompt"] = role.default_system_prompt
+    if not (data.get("business_rules") or "").strip():
+        data["business_rules"] = role.default_business_rules
+    if payload.agent_type == "resource_matching":
+        data["require_source_quote"] = False
+        data["extraction_schema"] = {}
+    agent = AgentProfile(**data)
     db.add(agent)
     db.flush()
     save_execution(db, agent.id, payload.execution)
@@ -106,6 +126,7 @@ def duplicate_agent(agent_id: str, db: Session = Depends(get_db)) -> AgentProfil
         raise HTTPException(status_code=404, detail="智能体不存在")
 
     copy_agent = AgentProfile(
+        agent_type=src.agent_type,
         name=f"{src.name} (副本)",
         description=src.description,
         base_url=src.base_url,
@@ -132,8 +153,9 @@ def delete_agent(agent_id: str, db: Session = Depends(get_db)) -> None:
     agent = db.get(AgentProfile, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="智能体不存在")
-    if db.query(AgentProfile).count() <= 1:
-        raise HTTPException(status_code=400, detail="至少保留一个智能体配置")
+    role_count = db.query(AgentProfile).filter(AgentProfile.agent_type == agent.agent_type).count()
+    if role_count <= 1:
+        raise HTTPException(status_code=400, detail=f"角色 {agent.agent_type} 至少保留一个智能体配置")
     runtime = db.get(AgentExecutionSettings, agent.id)
     if runtime:
         db.delete(runtime)

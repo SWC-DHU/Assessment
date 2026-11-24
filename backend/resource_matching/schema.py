@@ -6,15 +6,18 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agents.runtime import AgentRunMetadata, FallbackPolicy
 from domain_semantics.schema import ModelingTask, ProcessGraph, ProcessRelation
 
 RESOURCE_MATCHING_OUTPUT_VERSION = "1.0.0"
 
 CheckVerdict = Literal["PASS", "FAIL", "UNKNOWN"]
 MatchingMethod = Literal["A", "B", "C"]
+LLMMode = Literal["disabled", "enhanced"]
 CandidateDisposition = Literal["qualified", "partial_qualified", "pending_confirmation", "rejected"]
 OperationMatchStatus = Literal["matched_single", "matched_partial_composable", "pending_only", "unmatched", "blocked"]
 OverallMatchingStatus = Literal["completed", "completed_with_warnings", "partial", "blocked"]
+FeedbackSource = Literal["upstream_requirement", "asset_catalog_gap", "constraint_ambiguity", "llm_runtime"]
 
 
 class MatchingRecord(BaseModel):
@@ -48,11 +51,23 @@ class ResourceMatchingConfig(MatchingRecord):
     top_k: int = Field(default=3, ge=1, le=20, description="每道工序输出的 Top-k 完整覆盖单资产候选数")
     partial_top_k: int = Field(default=3, ge=1, le=10, description="按能力划分的部分资产候选 Top-k 数量")
     method: MatchingMethod = Field(default="C", description="匹配方法：A=关键词基线，B=直接LLM基线，C=本体语义增强+多约束推理")
-    use_llm: bool = Field(default=False, description="方法C是否启用LLM辅助定性语义消歧与匹配解释")
+    llm_mode: LLMMode = Field(default="disabled", description="LLM 执行模式：disabled=纯确定性，enhanced=LLM语义消歧与策略协同增强")
+    use_llm: bool = Field(default=False, description="兼容字段，与 llm_mode 自动保持一致")
+    fallback_policy: FallbackPolicy = Field(default="degrade_deterministic", description="LLM 不可用或调用失败时的策略：degrade_deterministic / fail_fast")
+    max_llm_calls: int = Field(default=3, ge=1, le=12, description="单次匹配运行的 LLM 最大调用预算")
+    max_strategy_retries: int = Field(default=1, ge=0, le=3, description="未匹配工序的有限策略重试次数上限")
     allow_warnings_input: bool = Field(default=True, description="是否允许消费 handoff_validation=ready_with_warnings 的输入")
     force_blocked_diagnostic: bool = Field(default=False, description="当输入为 blocked 时是否仍输出逐工序诊断而不中断")
     include_rejected_details: bool = Field(default=True, description="是否在输出中保留淘汰候选及淘汰原因")
     weights: ScoringWeights = Field(default_factory=ScoringWeights)
+
+    @model_validator(mode="after")
+    def sync_llm_flags(self):
+        if self.use_llm and self.llm_mode == "disabled":
+            self.llm_mode = "enhanced"
+        elif self.llm_mode == "enhanced" and not self.use_llm:
+            self.use_llm = True
+        return self
 
 
 class ConstraintCheckItem(MatchingRecord):
@@ -118,6 +133,31 @@ class UnmetRequirement(MatchingRecord):
     capability_codes: list[str] = Field(default_factory=list)
 
 
+class LLMStrategyRecord(MatchingRecord):
+    """Audit record of LLM-assisted semantic disambiguation & retrieval strategy adjustment."""
+    triggered: bool = False
+    trigger_reasons: list[str] = Field(default_factory=list)
+    proposed_asset_ids: list[str] = Field(default_factory=list)
+    verified_added_asset_ids: list[str] = Field(default_factory=list)
+    rejected_hallucinated_ids: list[str] = Field(default_factory=list)
+    rejected_hard_constraint_ids: list[str] = Field(default_factory=list)
+    preferred_categories: list[str] = Field(default_factory=list)
+    capability_decomposition_hint: list[list[str]] = Field(default_factory=list)
+    qualitative_refinements: list[str] = Field(default_factory=list)
+    retries_used: int = Field(default=0, ge=0)
+
+
+class StructuredFeedbackItem(MatchingRecord):
+    """Non-mutating diagnostic feedback for upstream requirement parsing or catalog curation."""
+    feedback_id: str
+    issue_source: FeedbackSource
+    severity: Literal["blocker", "warning", "info"]
+    operation_ids: list[str] = Field(default_factory=list)
+    message: str
+    suggested_action: str
+    mutates_upstream: Literal[False] = False
+
+
 class OperationMatchingResult(MatchingRecord):
     operation_id: str
     operation_number: str | None = None
@@ -139,6 +179,7 @@ class OperationMatchingResult(MatchingRecord):
     pending_candidates: list[CandidateEvaluation] = Field(default_factory=list)
     rejected_candidates: list[CandidateEvaluation] = Field(default_factory=list)
     unmet_requirements: list[UnmetRequirement] = Field(default_factory=list)
+    llm_strategy: LLMStrategyRecord | None = None
     llm_explanation: str | None = None
     diagnostics: list[str] = Field(default_factory=list)
 
@@ -190,7 +231,10 @@ class MatchingSummary(MatchingRecord):
     average_top1_capability_coverage: float = Field(default=0.0, ge=0.0, le=1.0)
     total_duration_ms: float = Field(default=0.0, ge=0.0)
     llm_calls: int = 0
+    llm_retries: int = 0
     llm_model_used: str | None = None
+    fallback_triggered: bool = False
+    fallback_reason: str | None = None
 
 
 class ResourceMatchingOutput(MatchingRecord):
@@ -206,6 +250,7 @@ class ResourceMatchingOutput(MatchingRecord):
     ontology_version: str
     vocabulary_version: str
     config: ResourceMatchingConfig
+    run_metadata: AgentRunMetadata | None = None
     modeling_task: ModelingTask | None = None
     target_product_ids: list[str] = Field(default_factory=list)
     line_constraints: list[LineConstraintReference] = Field(default_factory=list)
@@ -215,4 +260,5 @@ class ResourceMatchingOutput(MatchingRecord):
     matching_status: OverallMatchingStatus
     summary: MatchingSummary = Field(default_factory=MatchingSummary)
     diagnostics: list[MatchingDiagnostic] = Field(default_factory=list)
+    feedback_items: list[StructuredFeedbackItem] = Field(default_factory=list)
     tool_trace: list[AgentTraceStep] = Field(default_factory=list)

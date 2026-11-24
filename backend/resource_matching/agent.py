@@ -1,19 +1,20 @@
-"""Resource Matching Agent: LLM + deterministic tool collaboration & A/B/C experiment methods."""
+"""Resource Matching Agent: deterministic + LLM-assisted semantic disambiguation, strategy refinement & A/B/C methods."""
 from __future__ import annotations
 
-from dataclasses import replace
 import json
 from time import perf_counter
 import uuid
 
-from app.services.llm_extractor import ExtractorConfig, run_extraction
+from agents.config import ResolvedAgentRuntime
+from agents.llm_client import ExtractorConfig, UnifiedLLMClient
+from agents.runtime import AgentRunMetadata, RunBudget
 from domain_semantics.catalog import load_vocabulary, semantic_mappings
 from domain_semantics.handoff import ResourceMatchingInput
 from model_assets.catalog import AssetCatalog, get_default_catalog
-from model_assets.schema import ModelAsset
 from model_assets.validation import compute_completeness
 
 from .constraints import build_line_takt_reference, evaluate_asset_constraints
+from .prompts import MATCHING_PROMPT_VERSION, compose_matching_system_prompt
 from .ranking import rank_evaluations
 from .retrieval import (
     DereferencedMatchingContext,
@@ -32,28 +33,18 @@ from .schema import (
     ResourceMatchingConfig,
     ResourceMatchingOutput,
     ScoreBreakdown,
+    StructuredFeedbackItem,
     UnmetRequirement,
 )
-from .tools import MatchingTrace, tool_evaluate_candidate
+from .tools import MatchingTrace, tool_evaluate_candidate, verify_llm_strategy_proposal
 
-LLM_EXPLAIN_SYSTEM_PROMPT = """你是一位数字孪生制造产线资源匹配专家。
-后端确定性引擎已经完成了标准制造能力编码检索、单位换算、三值硬约束校验（PASS/FAIL/UNKNOWN）和综合评分排序。
-你的任务仅限于：
-1. 针对给定工序的复杂定性工艺要求或设备描述，给出简明、专业的工程匹配解释（1~2 句话）；
-2. 不得推翻硬约束 FAIL 的淘汰结论，也不得编造输入中不存在的资产 ID 或数值。
-请严格输出 JSON 对象：{"explanations": {"<operation_id>": "<简洁工程匹配说明>"}}。"""
 
-LLM_DIRECT_METHOD_B_PROMPT = """你是一位数字孪生制造产线设备资源匹配助手。
-请根据给定的工序需求和候选模型资产摘要，直接为每道工序推荐最合适的 Top-k 模型资产 ID，并给出简要理由。
-只能从提供的模型资产 ID 中选择，不得编造不存在的 ID。
-严格输出 JSON 对象：
-{
-  "matches": {
-    "<operation_id>": [
-      {"asset_id": "<资产ID>", "reason": "<简要理由>", "score": 0.85}
-    ]
-  }
-}"""
+class MatchingExecutionError(RuntimeError):
+    """Raised when fail_fast fallback_policy forbids silent degradation on LLM errors."""
+
+    def __init__(self, error_code: str, message: str):
+        self.error_code = error_code
+        super().__init__(message)
 
 
 def _build_line_refs(context: DereferencedMatchingContext) -> list[LineConstraintReference]:
@@ -120,7 +111,6 @@ def _match_operation_method_c(
     full_pool, partial_pool = retrieve_semantic_candidates(op, catalog)
     all_retrieved = [*full_pool, *partial_pool]
 
-    # 1. Evaluate full-coverage single-asset candidates
     full_qualified: list[CandidateEvaluation] = []
     pending_full: list[CandidateEvaluation] = []
     rejected_all: list[CandidateEvaluation] = []
@@ -134,7 +124,6 @@ def _match_operation_method_c(
         else:
             rejected_all.append(ev)
 
-    # Also evaluate partial_pool against full-op requirement if we want clear diagnostics on capability-insufficient distractors
     if config.include_rejected_details:
         for asset in partial_pool:
             ev = tool_evaluate_candidate(op, asset, all_retrieved, context, config)
@@ -145,13 +134,11 @@ def _match_operation_method_c(
     pending_ranked = rank_evaluations(pending_full)
     rejected_ranked = rank_evaluations(rejected_all) if config.include_rejected_details else []
 
-    # 2. Per-capability partial candidates (always built for multi-capability ops, or when single-asset unmatched)
     partial_groups: list[CapabilityPartialCandidates] = []
     should_build_partial = len(op.required_capability_codes) > 1 or not top_k
     if should_build_partial:
         for cap_code in op.required_capability_codes:
             cap_assets = [a for a in all_retrieved if cap_code in a.capability_codes]
-            # Prioritize dedicated/partial assets alongside full assets that cover this capability
             cap_qualified: list[CandidateEvaluation] = []
             cap_pending: list[CandidateEvaluation] = []
             for asset in cap_assets:
@@ -174,7 +161,6 @@ def _match_operation_method_c(
                 )
             )
 
-    # 3. Determine operation match_status, multi_asset_recommended, and unmet_requirements
     unmet: list[UnmetRequirement] = []
     diagnostics: list[str] = []
     composable_all = bool(partial_groups) and all(bool(group.candidates) for group in partial_groups)
@@ -242,7 +228,7 @@ def _match_operation_method_a(
     catalog: AssetCatalog,
     config: ResourceMatchingConfig,
 ) -> OperationMatchingResult:
-    """Method A baseline: Keyword-only matching (no ontology capability enforcement, no 3-value constraint filter)."""
+    """Method A baseline: Keyword-only matching (audited by deterministic checks)."""
     base_fields = dict(
         operation_id=op.operation_id,
         operation_number=op.operation_number,
@@ -264,17 +250,6 @@ def _match_operation_method_a(
     hits = retrieve_keyword_candidates(op, catalog)[: config.top_k]
     candidates_out: list[CandidateEvaluation] = []
     for idx, (asset, kw_score, matched_tokens) in enumerate(hits, start=1):
-        # Compute real constraint checks for transparent experiment auditing,
-        # but Method A does NOT filter by hard constraints (it ranks purely by keyword score)!
-        # To respect CandidateEvaluation's invariant while allowing Method A experiment scoring,
-        # we record the actual constraint checks and keep disposition="qualified" ONLY when we mark
-        # an audit field — wait: CandidateEvaluation enforces qualified => PASS!
-        # So for Method A/B baselines, we store baseline picks in top_k_candidates when PASS, OR
-        # let's evaluate and record real checks cleanly: wait — Method A/B can pick assets that violate
-        # hard constraints, which is literally how "硬约束违反率" (hard constraint violation rate) is measured!
-        # Let's handle that cleanly by computing real checks on the side or allowing raw baseline picks
-        # in the experiment evaluator, while in ResourceMatchingOutput keeping the invariant intact OR
-        # providing a dedicated `run_baseline_picks` helper for Method A/B!
         hard_verdict, checks, _, rej, miss = evaluate_asset_constraints(op, asset, context)
         req = list(op.required_capability_codes)
         provided = set(asset.capability_codes)
@@ -326,45 +301,247 @@ def _match_operation_method_a(
     )
 
 
-async def _run_llm_explanations(
-    llm_config: ExtractorConfig,
-    results: list[OperationMatchingResult],
-) -> tuple[dict[str, str], int, str | None]:
-    payload = [
-        {
-            "operation_id": r.operation_id,
-            "operation_name": r.operation_name,
-            "required_capabilities": r.required_capability_codes,
-            "match_status": r.match_status,
-            "top_candidates": [
-                {
-                    "asset_id": c.asset_id,
-                    "asset_name": c.asset_name,
-                    "score": c.score_breakdown.total_score,
-                    "reasons": c.match_reasons[:3],
-                }
-                for c in r.top_k_candidates[:3]
-            ],
-            "pending_count": len(r.pending_candidates),
-            "rejected_count": len(r.rejected_candidates),
-        }
-        for r in results
-    ]
-    configured = replace(
-        llm_config,
-        domain_instruction=LLM_EXPLAIN_SYSTEM_PROMPT,
-        extraction_schema={},
-        require_source_quote=False,
-        request_budget=1,
+def _needs_llm_strategy(op: DereferencedOperation, res: OperationMatchingResult) -> list[str]:
+    """Identify why an operation benefits from LLM semantic disambiguation or retrieval strategy refinement."""
+    reasons: list[str] = []
+    if res.match_status in {"unmatched", "pending_only", "matched_partial_composable"}:
+        reasons.append(f"初始匹配状态为 {res.match_status}")
+    if op.equipment_requirement:
+        has_unknown_eq = any(
+            any(chk.scope == "equipment" and chk.verdict == "UNKNOWN" for chk in c.constraint_checks)
+            for c in [*res.top_k_candidates, *res.pending_candidates, *res.rejected_candidates[:3]]
+        )
+        if has_unknown_eq or not res.top_k_candidates:
+            reasons.append("存在待消歧的设备文本条件")
+    has_unknown_qual = any(
+        any(not chk.is_hard and chk.scope in {"operation", "capability"} and chk.verdict == "UNKNOWN" for chk in c.constraint_checks)
+        for c in [*res.top_k_candidates, *res.pending_candidates]
     )
-    res = await run_extraction(configured, json.dumps(payload, ensure_ascii=False), [])
-    calls = int(res.debug_info.get("request_count") or 0)
-    model_used = res.debug_info.get("model_used")
-    if res.status == "success" and isinstance(res.extracted_json, dict):
-        raw_map = res.extracted_json.get("explanations")
-        if isinstance(raw_map, dict):
-            return {str(k): str(v) for k, v in raw_map.items() if isinstance(v, str)}, calls, model_used
-    return {}, calls, model_used
+    if has_unknown_qual:
+        reasons.append("存在待核验的定性工艺约束")
+    if len(op.required_capability_codes) > 1 and res.partial_candidates_by_capability:
+        reasons.append("多能力工序需权衡单设备与多模型协同拆分")
+    return reasons
+
+
+def _compact_catalog_summary(catalog: AssetCatalog) -> list[dict]:
+    return [
+        {
+            "asset_id": a.asset_id,
+            "name": a.identity.name,
+            "category": a.identity.category,
+            "capabilities": a.capability_codes,
+            "materials": a.material_compatibility.supported_material_types,
+            "description": a.identity.description[:90],
+        }
+        for a in catalog.all_assets()
+    ]
+
+
+async def _run_llm_collaborative_stage(
+    client: UnifiedLLMClient,
+    budget: RunBudget,
+    context: DereferencedMatchingContext,
+    op_results: list[OperationMatchingResult],
+    catalog: AssetCatalog,
+    config: ResourceMatchingConfig,
+    trace: MatchingTrace,
+    *,
+    custom_system_prompt: str = "",
+    custom_business_rules: str = "",
+) -> tuple[list[OperationMatchingResult], list[StructuredFeedbackItem], str | None, bool, str | None]:
+    """Execute LLM semantic disambiguation + retrieval strategy adjustment with deterministic tool verification."""
+    op_by_id = {op.operation_id: op for op in context.operations}
+    feedbacks: list[StructuredFeedbackItem] = []
+    model_used: str | None = None
+    fallback_triggered = False
+    fallback_reason: str | None = None
+
+    targets: list[tuple[DereferencedOperation, OperationMatchingResult, list[str]]] = []
+    for res in op_results:
+        if res.match_status == "blocked":
+            continue
+        op = op_by_id.get(res.operation_id)
+        if op is None:
+            continue
+        reasons = _needs_llm_strategy(op, res)
+        if reasons:
+            targets.append((op, res, reasons))
+
+    vocab = load_vocabulary()
+    catalog_summary = _compact_catalog_summary(catalog)
+    result_map = {r.operation_id: r for r in op_results}
+
+    # Strategy disambiguation & retrieval adjustment round (+ bounded retry on still-unmatched ops)
+    if targets:
+        attempt = 0
+        pending_targets = list(targets)
+        while pending_targets and (attempt == 0 or budget.can_retry()):
+            if attempt > 0:
+                budget.consume_retry()
+            started = perf_counter()
+            system_prompt = compose_matching_system_prompt(
+                "strategy_disambiguation",
+                custom_system_prompt=custom_system_prompt,
+                custom_business_rules=custom_business_rules,
+            )
+            payload = {
+                "attempt": attempt + 1,
+                "is_retry_for_unmatched": attempt > 0,
+                "controlled_categories": list(vocab.get("asset_categories", {}).keys()),
+                "controlled_capabilities": list(vocab.get("capabilities", {}).keys()),
+                "operations": [
+                    {
+                        "operation_id": op.operation_id,
+                        "operation_name": op.operation_name,
+                        "required_capabilities": op.required_capability_codes,
+                        "input_materials": [m.raw_name for m in op.input_materials],
+                        "output_materials": [m.raw_name for m in op.output_materials],
+                        "equipment_requirement": op.equipment_requirement,
+                        "qualitative_constraints": [c.description or c.name for c in op.operation_constraints if c.comparator is None],
+                        "current_status": result_map[op.operation_id].match_status,
+                        "trigger_reasons": reasons,
+                        "current_top_candidates": [
+                            {"asset_id": c.asset_id, "name": c.asset_name, "score": c.score_breakdown.total_score}
+                            for c in result_map[op.operation_id].top_k_candidates[:3]
+                        ],
+                        "current_pending_ids": [c.asset_id for c in result_map[op.operation_id].pending_candidates[:4]],
+                    }
+                    for op, _, reasons in pending_targets
+                ],
+                "catalog_summary": catalog_summary,
+            }
+            call_res = await client.complete_json(
+                system_prompt=system_prompt,
+                user_content=json.dumps(payload, ensure_ascii=False),
+                budget=budget,
+            )
+            elapsed_ms = (perf_counter() - started) * 1000
+            if call_res.model_used:
+                model_used = call_res.model_used
+
+            if not call_res.ok or not isinstance(call_res.data, dict):
+                fallback_triggered = True
+                fallback_reason = call_res.error_message or "LLM 策略消歧调用失败"
+                trace.record(
+                    f"llm_strategy_round_{attempt + 1}",
+                    "llm_semantic_disambiguation",
+                    "warning",
+                    elapsed_ms,
+                    f"LLM 策略调用失败（{call_res.error_code}）：{fallback_reason}",
+                )
+                if config.fallback_policy == "fail_fast":
+                    raise MatchingExecutionError(call_res.error_code or "llm_call_failed", fallback_reason)
+                break
+
+            strategies = call_res.data.get("strategies")
+            if not isinstance(strategies, list):
+                strategies = []
+            by_op = {
+                str(item.get("operation_id")): item
+                for item in strategies
+                if isinstance(item, dict) and item.get("operation_id")
+            }
+
+            verified_count = 0
+            hallucination_count = 0
+            still_unmatched: list[tuple[DereferencedOperation, OperationMatchingResult, list[str]]] = []
+            verify_start = perf_counter()
+            for op, _, reasons in pending_targets:
+                proposal = by_op.get(op.operation_id)
+                if not proposal:
+                    continue
+                updated_res, upstream_fb = verify_llm_strategy_proposal(
+                    op,
+                    result_map[op.operation_id],
+                    proposal,
+                    context,
+                    catalog,
+                    config,
+                    trigger_reasons=reasons,
+                    retries_used=attempt,
+                )
+                result_map[op.operation_id] = updated_res
+                verified_count += 1
+                if updated_res.llm_strategy:
+                    hallucination_count += len(updated_res.llm_strategy.rejected_hallucinated_ids)
+                if upstream_fb:
+                    feedbacks.append(
+                        StructuredFeedbackItem(
+                            feedback_id=f"fb:llm:{op.operation_id}:{attempt + 1}",
+                            issue_source="constraint_ambiguity",
+                            severity="info",
+                            operation_ids=[op.operation_id],
+                            message=upstream_fb,
+                            suggested_action="请在需求解析工作台或资产库中人工核对后生成新版本（本反馈不修改上游需求）。",
+                        )
+                    )
+                if updated_res.match_status == "unmatched":
+                    still_unmatched.append((op, updated_res, [*reasons, "首轮策略调整后仍未匹配"]))
+
+            trace.record(
+                f"llm_strategy_round_{attempt + 1}",
+                "llm_semantic_disambiguation",
+                "success",
+                elapsed_ms,
+                f"LLM 第 {attempt + 1} 轮协同分析 {len(pending_targets)} 道工序，返回 {len(by_op)} 条策略建议",
+            )
+            trace.record(
+                f"verify_llm_strategy_round_{attempt + 1}",
+                "verify_llm_strategy_proposal",
+                "warning" if hallucination_count else "success",
+                (perf_counter() - verify_start) * 1000,
+                f"确定性工具复验 {verified_count} 道工序的 LLM 策略（拦截幻觉 ID {hallucination_count} 个）",
+            )
+
+            pending_targets = still_unmatched
+            attempt += 1
+
+    # Optional concise explanation pass for remaining operations lacking explanation if budget remains
+    unexplained = [r for r in result_map.values() if r.match_status != "blocked" and not r.llm_explanation]
+    if unexplained and not fallback_triggered and budget.can_call():
+        started = perf_counter()
+        system_prompt = compose_matching_system_prompt(
+            "explain_results",
+            custom_system_prompt=custom_system_prompt,
+            custom_business_rules=custom_business_rules,
+        )
+        exp_payload = [
+            {
+                "operation_id": r.operation_id,
+                "operation_name": r.operation_name,
+                "required_capabilities": r.required_capability_codes,
+                "match_status": r.match_status,
+                "top_candidates": [
+                    {"asset_id": c.asset_id, "asset_name": c.asset_name, "score": c.score_breakdown.total_score}
+                    for c in r.top_k_candidates[:3]
+                ],
+            }
+            for r in unexplained
+        ]
+        call_res = await client.complete_json(
+            system_prompt=system_prompt,
+            user_content=json.dumps(exp_payload, ensure_ascii=False),
+            budget=budget,
+        )
+        if call_res.model_used:
+            model_used = call_res.model_used
+        if call_res.ok and isinstance(call_res.data, dict) and isinstance(call_res.data.get("explanations"), dict):
+            count = 0
+            for op_id, text in call_res.data["explanations"].items():
+                if op_id in result_map and isinstance(text, str) and text.strip():
+                    result_map[op_id] = result_map[op_id].model_copy(update={"llm_explanation": text.strip()})
+                    count += 1
+            trace.record(
+                "llm_result_explanations",
+                "llm_semantic_disambiguation",
+                "success",
+                (perf_counter() - started) * 1000,
+                f"补充生成 {count} 道工序的工程匹配说明",
+            )
+
+    ordered = [result_map[r.operation_id] for r in op_results]
+    return ordered, feedbacks, model_used, fallback_triggered, fallback_reason
 
 
 async def _run_method_b_llm(
@@ -376,14 +553,12 @@ async def _run_method_b_llm(
     """Method B baseline: direct LLM matching without ontology/constraint engine."""
     diagnostics: list[MatchingDiagnostic] = []
     raw_picks: dict[str, list[dict]] = {}
-    if llm_config is None or not llm_config.api_key.strip() or llm_config.base_url.strip().startswith("mock://"):
-        diagnostics.append(
-            MatchingDiagnostic(
-                code="method_b_llm_unavailable",
-                severity="warning",
-                message="方法B（直接LLM匹配）需要已配置的在线 LLM Provider；当前为离线/未配置状态，返回空匹配结果。",
-            )
-        )
+    client = UnifiedLLMClient(llm_config) if llm_config else None
+    if client is None or not client.is_configured:
+        msg = "方法B（直接LLM匹配）需要已配置的在线 resource_matching LLM Provider；当前为离线/未配置状态。"
+        if config.fallback_policy == "fail_fast":
+            raise MatchingExecutionError("unconfigured", msg)
+        diagnostics.append(MatchingDiagnostic(code="method_b_llm_unavailable", severity="warning", message=msg))
         empty = [
             OperationMatchingResult(
                 operation_id=op.operation_id,
@@ -413,32 +588,13 @@ async def _run_method_b_llm(
         }
         for op in context.operations
     ]
-    assets_summary = [
-        {
-            "asset_id": a.asset_id,
-            "name": a.identity.name,
-            "category": a.identity.category,
-            "capabilities": a.capability_codes,
-            "materials": a.material_compatibility.supported_material_types,
-            "description": a.identity.description[:80],
-        }
-        for a in catalog.all_assets()
-    ]
     prompt_body = json.dumps(
-        {"top_k": config.top_k, "operations": ops_summary, "assets": assets_summary},
+        {"top_k": config.top_k, "operations": ops_summary, "assets": _compact_catalog_summary(catalog)},
         ensure_ascii=False,
     )
-    configured = replace(
-        llm_config,
-        domain_instruction=LLM_DIRECT_METHOD_B_PROMPT,
-        extraction_schema={},
-        require_source_quote=False,
-        request_budget=1,
-    )
-    res = await run_extraction(configured, prompt_body, [])
-    calls = int(res.debug_info.get("request_count") or 0)
-    model_used = res.debug_info.get("model_used")
-    matches_map = (res.extracted_json or {}).get("matches", {}) if isinstance(res.extracted_json, dict) else {}
+    sys_prompt = compose_matching_system_prompt("direct_baseline")
+    call_res = await client.complete_json(system_prompt=sys_prompt, user_content=prompt_body)
+    matches_map = (call_res.data or {}).get("matches", {}) if call_res.ok and isinstance(call_res.data, dict) else {}
     if not isinstance(matches_map, dict):
         matches_map = {}
 
@@ -516,7 +672,68 @@ async def _run_method_b_llm(
                 diagnostics=["方法B（直接LLM匹配）结果，已附加确定性硬约束审计。"],
             )
         )
-    return results, raw_picks, calls, model_used, diagnostics
+    return results, raw_picks, call_res.request_count, call_res.model_used, diagnostics
+
+
+def _build_structured_feedback(
+    rmi: ResourceMatchingInput,
+    op_results: list[OperationMatchingResult],
+    extra_feedback: list[StructuredFeedbackItem],
+    fallback_triggered: bool,
+    fallback_reason: str | None,
+) -> list[StructuredFeedbackItem]:
+    items: list[StructuredFeedbackItem] = []
+
+    for idx, issue in enumerate(rmi.handoff_validation.issues):
+        items.append(
+            StructuredFeedbackItem(
+                feedback_id=f"fb:upstream:{idx + 1}",
+                issue_source="upstream_requirement",
+                severity="blocker" if issue.severity == "blocker" else "warning",
+                operation_ids=list(issue.operation_ids),
+                message=f"上游需求交接问题（{issue.code}）：{issue.message}",
+                suggested_action="请在「需求解析」工作台补充来源或通过人工审核生成新的语义版本（资源匹配不修改上游模型）。",
+            )
+        )
+
+    for res in op_results:
+        if res.match_status == "unmatched":
+            items.append(
+                StructuredFeedbackItem(
+                    feedback_id=f"fb:catalog:{res.operation_id}",
+                    issue_source="asset_catalog_gap",
+                    severity="warning",
+                    operation_ids=[res.operation_id],
+                    message=f"工序「{res.operation_name}」（需求能力：{', '.join(res.required_capability_codes)}）在资产库中无合格候选。",
+                    suggested_action="建议在「模型资产库」补充覆盖对应能力与物料的设备资产，或复核该工序的约束边界。",
+                )
+            )
+        elif res.match_status == "pending_only":
+            items.append(
+                StructuredFeedbackItem(
+                    feedback_id=f"fb:pending:{res.operation_id}",
+                    issue_source="asset_catalog_gap",
+                    severity="info",
+                    operation_ids=[res.operation_id],
+                    message=f"工序「{res.operation_name}」仅存在信息待补全的候选资产（{len(res.pending_candidates)} 项）。",
+                    suggested_action="建议在「模型资产库」补全候选资产的技术参数、加工时间或状态转换后重新执行匹配。",
+                )
+            )
+
+    if fallback_triggered and fallback_reason:
+        items.append(
+            StructuredFeedbackItem(
+                feedback_id="fb:runtime:fallback",
+                issue_source="llm_runtime",
+                severity="warning",
+                operation_ids=[],
+                message=f"LLM 增强模式已触发安全降级：{fallback_reason}",
+                suggested_action="已自动降级为纯确定性语义+多约束匹配并保留完整结果；如需启用 LLM 协同，请在「资源匹配智能体」配置有效的在线 LLM。",
+            )
+        )
+
+    items.extend(extra_feedback)
+    return items
 
 
 async def run_resource_matching(
@@ -525,17 +742,70 @@ async def run_resource_matching(
     catalog: AssetCatalog | None = None,
     config: ResourceMatchingConfig | None = None,
     llm_config: ExtractorConfig | None = None,
+    runtime: ResolvedAgentRuntime | None = None,
     run_id: str | None = None,
 ) -> ResourceMatchingOutput:
-    """Execute the complete Resource Matching Agent pipeline on a ResourceMatchingInput."""
+    """Execute the Resource Matching Agent pipeline with strict role isolation & deterministic verification."""
     started = perf_counter()
     active_catalog = catalog or get_default_catalog()
     active_config = config or ResourceMatchingConfig()
     effective_run_id = run_id or str(uuid.uuid4())
+    effective_llm_cfg = llm_config or (runtime.llm_config if runtime else None)
     trace = MatchingTrace()
     diagnostics: list[MatchingDiagnostic] = []
+    extra_feedback: list[StructuredFeedbackItem] = []
+
+    budget = RunBudget(
+        max_calls=active_config.max_llm_calls,
+        max_retries=active_config.max_strategy_retries,
+    )
     llm_calls = 0
+    llm_retries = 0
     llm_model_used: str | None = None
+    fallback_triggered = False
+    fallback_reason: str | None = None
+
+    def make_metadata(mode: str, elapsed: float) -> AgentRunMetadata:
+        snapshot = (
+            runtime.non_sensitive_snapshot(
+                prompt_version=MATCHING_PROMPT_VERSION,
+                extra={
+                    "method": active_config.method,
+                    "llm_mode": active_config.llm_mode,
+                    "top_k": active_config.top_k,
+                    "fallback_policy": active_config.fallback_policy,
+                    "max_llm_calls": active_config.max_llm_calls,
+                    "max_strategy_retries": active_config.max_strategy_retries,
+                },
+            )
+            if runtime is not None
+            else {
+                "agent_type": "resource_matching",
+                "method": active_config.method,
+                "llm_mode": active_config.llm_mode,
+                "top_k": active_config.top_k,
+                "fallback_policy": active_config.fallback_policy,
+                "prompt_version": MATCHING_PROMPT_VERSION,
+                "effective_model": effective_llm_cfg.model if effective_llm_cfg else None,
+            }
+        )
+        return AgentRunMetadata(
+            agent_type="resource_matching",
+            agent_id=runtime.agent_id if runtime else None,
+            agent_name=runtime.agent_name if runtime else None,
+            model_requested=effective_llm_cfg.model if effective_llm_cfg else None,
+            model_used=llm_model_used,
+            prompt_version=MATCHING_PROMPT_VERSION,
+            input_version=rmi.source_model.run_id,
+            execution_mode=mode,
+            config_snapshot=snapshot,
+            tool_calls_count=len(trace.steps),
+            llm_calls=llm_calls,
+            llm_retries=llm_retries,
+            fallback_triggered=fallback_triggered,
+            fallback_reason=fallback_reason,
+            elapsed_ms=elapsed,
+        )
 
     # Step 1: Dereference and check handoff status
     context = trace.call(
@@ -547,13 +817,12 @@ async def run_resource_matching(
     )
 
     # Step 2: Query ontology demand↔resource mappings
-    mappings = trace.call(
+    trace.call(
         "ontology_mapping_lookup",
         "query_ontology_mappings",
         semantic_mappings,
         summary_fn=lambda items: f"加载 {len(items)} 条共享本体需求↔资源语义映射规则",
     )
-    _ = mappings
 
     line_refs = _build_line_refs(context)
 
@@ -585,6 +854,7 @@ async def run_resource_matching(
             for op in context.operations
         ]
         elapsed_ms = round((perf_counter() - started) * 1000, 2)
+        feedback_items = _build_structured_feedback(rmi, blocked_ops, [], False, None)
         return ResourceMatchingOutput(
             run_id=effective_run_id,
             source_requirement_version=rmi.source_model.run_id,
@@ -595,6 +865,7 @@ async def run_resource_matching(
             ontology_version=rmi.source_model.ontology_version,
             vocabulary_version=rmi.source_model.vocabulary_version,
             config=active_config,
+            run_metadata=make_metadata("blocked", elapsed_ms),
             modeling_task=rmi.modeling_task,
             target_product_ids=list(rmi.target_product_ids),
             line_constraints=line_refs,
@@ -608,6 +879,7 @@ async def run_resource_matching(
                 total_duration_ms=elapsed_ms,
             ),
             diagnostics=diagnostics,
+            feedback_items=feedback_items,
             tool_trace=trace.steps,
         )
 
@@ -622,8 +894,9 @@ async def run_resource_matching(
                 )
             )
 
-    # Execute selected method (C / A / B)
     op_results: list[OperationMatchingResult] = []
+    exec_mode = "deterministic"
+
     if active_config.method == "C":
         match_start = perf_counter()
         for op in context.operations:
@@ -635,29 +908,69 @@ async def run_resource_matching(
             (perf_counter() - match_start) * 1000,
             f"完成 {len(op_results)} 道工序的语义检索、三值硬约束校验与 Top-{active_config.top_k} 排序",
         )
-        # Optional LLM explanation/disambiguation step
-        if active_config.use_llm and llm_config and llm_config.api_key.strip() and not llm_config.base_url.startswith("mock://"):
-            llm_start = perf_counter()
-            explanations, llm_calls, llm_model_used = await _run_llm_explanations(llm_config, op_results)
-            for item in op_results:
-                if item.operation_id in explanations:
-                    item.llm_explanation = explanations[item.operation_id]
-            trace.record(
-                "llm_disambiguation_and_explanation",
-                "llm_semantic_disambiguation",
-                "success" if explanations else "warning",
-                (perf_counter() - llm_start) * 1000,
-                f"LLM 生成 {len(explanations)} 道工序的工程匹配解释（调用 {llm_calls} 次）",
-            )
+
+        if active_config.llm_mode == "enhanced":
+            exec_mode = "llm_enhanced"
+            client = UnifiedLLMClient(effective_llm_cfg) if effective_llm_cfg else None
+            if client is None or not client.is_configured:
+                fallback_reason = (
+                    "当前资源匹配智能体配置为离线 mock:// 模式，未启用在线 LLM。"
+                    if (client and client.is_mock)
+                    else "当前资源匹配智能体尚未配置可用 API Key，无法执行在线 LLM 协同消歧。"
+                )
+                if active_config.fallback_policy == "fail_fast":
+                    raise MatchingExecutionError("unconfigured", fallback_reason)
+                fallback_triggered = True
+                exec_mode = "llm_enhanced_degraded"
+                diagnostics.append(
+                    MatchingDiagnostic(
+                        code="llm_degraded_to_deterministic",
+                        severity="warning",
+                        message=f"{fallback_reason} 已按降级策略返回纯确定性语义+多约束匹配结果。",
+                    )
+                )
+                trace.record(
+                    "llm_disambiguation_and_strategy",
+                    "llm_semantic_disambiguation",
+                    "warning",
+                    0.0,
+                    f"已触发安全降级：{fallback_reason}",
+                )
+            else:
+                op_results, extra_feedback, llm_model_used, fallback_triggered, fallback_reason = (
+                    await _run_llm_collaborative_stage(
+                        client,
+                        budget,
+                        context,
+                        op_results,
+                        active_catalog,
+                        active_config,
+                        trace,
+                        custom_system_prompt=effective_llm_cfg.system_prompt if effective_llm_cfg else "",
+                        custom_business_rules=effective_llm_cfg.business_rules if effective_llm_cfg else "",
+                    )
+                )
+                llm_calls = budget.calls_used
+                llm_retries = budget.retries_used
+                if fallback_triggered:
+                    exec_mode = "llm_enhanced_degraded"
+                    diagnostics.append(
+                        MatchingDiagnostic(
+                            code="llm_degraded_to_deterministic",
+                            severity="warning",
+                            message=f"LLM 协同阶段异常并已降级为确定性结果：{fallback_reason}",
+                        )
+                    )
         else:
             trace.record(
-                "llm_disambiguation_and_explanation",
+                "llm_disambiguation_and_strategy",
                 "llm_semantic_disambiguation",
                 "skipped",
                 0.0,
-                "当前使用纯确定性语义引擎运行（未启用或未配置在线 LLM）",
+                "当前为纯确定性语义匹配模式（llm_mode=disabled），未发起 LLM 调用",
             )
     elif active_config.method == "A":
+        exec_mode = "method_a_keyword"
         match_start = perf_counter()
         for op in context.operations:
             op_results.append(_match_operation_method_a(op, context, active_catalog, active_config))
@@ -669,11 +982,15 @@ async def run_resource_matching(
             f"方法A关键词基线完成 {len(op_results)} 道工序匹配",
         )
     else:
+        exec_mode = "method_b_direct_llm"
         match_start = perf_counter()
         op_results, _, llm_calls, llm_model_used, method_b_diags = await _run_method_b_llm(
-            context, active_catalog, active_config, llm_config
+            context, active_catalog, active_config, effective_llm_cfg
         )
         diagnostics.extend(method_b_diags)
+        if llm_calls == 0:
+            fallback_triggered = True
+            fallback_reason = method_b_diags[0].message if method_b_diags else "方法B未配置在线 LLM"
         trace.record(
             "llm_direct_matching",
             "llm_semantic_disambiguation",
@@ -682,7 +999,6 @@ async def run_resource_matching(
             f"方法B直接LLM匹配完成（调用 {llm_calls} 次）",
         )
 
-    # Summarize results
     matched_single = sum(r.match_status == "matched_single" for r in op_results)
     matched_partial = sum(r.match_status == "matched_partial_composable" for r in op_results)
     pending_only = sum(r.match_status == "pending_only" for r in op_results)
@@ -704,12 +1020,15 @@ async def run_resource_matching(
         overall_status = "blocked"
     elif unmatched > 0 or pending_only > 0 or blocked > 0:
         overall_status = "partial"
-    elif diagnostics or matched_partial > 0:
+    elif diagnostics or matched_partial > 0 or fallback_triggered:
         overall_status = "completed_with_warnings"
     else:
         overall_status = "completed"
 
     elapsed_ms = round((perf_counter() - started) * 1000, 2)
+    feedback_items = _build_structured_feedback(rmi, op_results, extra_feedback, fallback_triggered, fallback_reason)
+    metadata = make_metadata(exec_mode, elapsed_ms)
+
     return ResourceMatchingOutput(
         run_id=effective_run_id,
         source_requirement_version=rmi.source_model.run_id,
@@ -720,6 +1039,7 @@ async def run_resource_matching(
         ontology_version=rmi.source_model.ontology_version,
         vocabulary_version=rmi.source_model.vocabulary_version,
         config=active_config,
+        run_metadata=metadata,
         modeling_task=rmi.modeling_task,
         target_product_ids=list(rmi.target_product_ids),
         line_constraints=line_refs,
@@ -737,8 +1057,12 @@ async def run_resource_matching(
             average_top1_capability_coverage=avg_cov,
             total_duration_ms=elapsed_ms,
             llm_calls=llm_calls,
+            llm_retries=llm_retries,
             llm_model_used=llm_model_used,
+            fallback_triggered=fallback_triggered,
+            fallback_reason=fallback_reason,
         ),
         diagnostics=diagnostics,
+        feedback_items=feedback_items,
         tool_trace=trace.steps,
     )

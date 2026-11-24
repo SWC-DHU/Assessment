@@ -3,6 +3,7 @@ from typing import Any, Literal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from agents.runtime import AgentType, FallbackPolicy
 from app.services.llm_extractor import SemanticThinking, ThinkingParameter, ThinkingResult, normalize_base_url
 from domain_semantics.schema import SCHEMA_VERSION
 
@@ -36,9 +37,13 @@ class AgentExecutionConfig(BaseModel):
     semantic_thinking: SemanticThinking | None = None
     thinking_parameter: ThinkingParameter = "thinking"
     llm_disambiguation: bool = True
+    fallback_policy: FallbackPolicy = "degrade_deterministic"
+    max_strategy_retries: int = Field(default=1, ge=0, le=3)
+    default_llm_mode: Literal["disabled", "enhanced"] = "disabled"
 
 
 class AgentProfileBase(BaseModel):
+    agent_type: AgentType = "requirement_parsing"
     execution: AgentExecutionConfig = Field(default_factory=AgentExecutionConfig)
     name: str = Field(..., min_length=1, max_length=120)
     description: str = ""

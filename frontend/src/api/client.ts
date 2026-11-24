@@ -6,6 +6,8 @@ import type {
   AgentModelsResponse,
   AgentProfile,
   AgentProfilePayload,
+  AgentRoleSpec,
+  AgentType,
   EnvStatus,
   OutputTemplate,
   OutputTemplatePayload,
@@ -62,7 +64,9 @@ export const api = {
     request<{ samples: SampleDataset[]; env_status: EnvStatus }>("/api/samples"),
 
   // Agents
-  listAgents: () => request<AgentProfile[]>("/api/agents"),
+  listAgentRoles: () => request<AgentRoleSpec[]>("/api/agents/roles"),
+  listAgents: (agentType?: AgentType) =>
+    request<AgentProfile[]>(`/api/agents${agentType ? `?agent_type=${encodeURIComponent(agentType)}` : ""}`),
   createAgent: (payload: AgentProfilePayload) =>
     request<AgentProfile>("/api/agents", {
       method: "POST",

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Button, Empty, InputNumber, Select, Switch, Tabs } from "antd";
+import { Alert, Button, Empty, InputNumber, Select, Tabs } from "antd";
 import {
   ArrowDownToLine,
   Braces,
@@ -8,14 +8,17 @@ import {
   GitBranch,
   History,
   Play,
+  Settings2,
   ShieldAlert,
   Sparkles,
   XCircle,
 } from "lucide-react";
 import { api } from "../api/client";
 import type {
+  AgentProfile,
   CandidateEvaluation,
   CheckVerdict,
+  LLMMode,
   MatchingMethod,
   MatchingRunSummary,
   OperationMatchingResult,
@@ -29,9 +32,19 @@ interface ResourceMatchingWorkbenchProps {
   sessions: TestSessionSummary[];
   initialSessionId: string | null;
   initialVersionId: string | null;
-  activeAgentId: string | null;
+  activeMatchingAgent: AgentProfile | null;
+  onOpenMatchingAgentConfig: () => void;
   onInspectAsset: (assetId: string) => void;
 }
+
+type MatchingPresetMode = "c_det" | "c_llm" | "a" | "b";
+
+const feedbackSourceLabels: Record<string, string> = {
+  upstream_requirement: "上游需求反馈",
+  asset_catalog_gap: "资产库能力缺口",
+  constraint_ambiguity: "约束语义歧义",
+  llm_runtime: "LLM 运行状态",
+};
 
 const opStatusLabels: Record<OperationMatchingResult["match_status"], string> = {
   matched_single: "单资产匹配",
@@ -184,7 +197,8 @@ export function ResourceMatchingWorkbench({
   sessions,
   initialSessionId,
   initialVersionId,
-  activeAgentId,
+  activeMatchingAgent,
+  onOpenMatchingAgentConfig,
   onInspectAsset,
 }: ResourceMatchingWorkbenchProps) {
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId ?? sessions[0]?.id ?? null);
@@ -195,8 +209,9 @@ export function ResourceMatchingWorkbench({
   const [output, setOutput] = useState<ResourceMatchingOutput | null>(null);
 
   const [topK, setTopK] = useState(3);
-  const [method, setMethod] = useState<MatchingMethod>("C");
-  const [useLlm, setUseLlm] = useState(false);
+  const [presetMode, setPresetMode] = useState<MatchingPresetMode>(
+    activeMatchingAgent?.execution?.default_llm_mode === "enhanced" ? "c_llm" : "c_det"
+  );
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [selectedOpId, setSelectedOpId] = useState<string | null>(null);
@@ -250,15 +265,18 @@ export function ResourceMatchingWorkbench({
     if (!sessionId || !versionId) return;
     setRunning(true);
     setError("");
+    const method: MatchingMethod = presetMode === "a" ? "A" : presetMode === "b" ? "B" : "C";
+    const llmMode: LLMMode = presetMode === "c_llm" ? "enhanced" : "disabled";
     try {
       const result = await api.runResourceMatching(sessionId, versionId, {
         config: {
           top_k: topK,
           partial_top_k: Math.max(3, topK),
           method,
-          use_llm: method === "C" ? useLlm : false,
+          llm_mode: llmMode,
+          use_llm: llmMode === "enhanced",
         },
-        agent_id: activeAgentId,
+        agent_id: activeMatchingAgent?.id ?? null,
         save: true,
       });
       setOutput(result);
@@ -313,6 +331,11 @@ export function ResourceMatchingWorkbench({
           </p>
         </div>
         <div className="module-toolbar-actions">
+          {activeMatchingAgent && (
+            <Button size="small" icon={<Settings2 size={14} />} onClick={onOpenMatchingAgentConfig}>
+              {activeMatchingAgent.name} · {activeMatchingAgent.effective_model}
+            </Button>
+          )}
           <Button size="small" icon={<Braces size={14} />} onClick={() => setSchemaOpen(true)}>
             查看输出 Schema
           </Button>
@@ -372,26 +395,21 @@ export function ResourceMatchingWorkbench({
           />
         </div>
         <div className="control-field">
-          <span>匹配方法</span>
-          <Select
+          <span>匹配模式</span>
+          <Select<MatchingPresetMode>
             size="small"
             aria-label="选择匹配方法"
-            value={method}
-            onChange={setMethod}
-            style={{ width: 185 }}
+            value={presetMode}
+            onChange={setPresetMode}
+            style={{ width: 220 }}
             options={[
-              { value: "C", label: "C · 本体语义+多约束推理" },
-              { value: "A", label: "A · 关键词匹配基线" },
-              { value: "B", label: "B · 直接 LLM 匹配基线" },
+              { value: "c_det", label: "C · 纯确定性语义+多约束" },
+              { value: "c_llm", label: "C+LLM · 语义消歧与策略协同" },
+              { value: "a", label: "A · 关键词匹配基线" },
+              { value: "b", label: "B · 直接 LLM 匹配基线" },
             ]}
           />
         </div>
-        {method === "C" && (
-          <label className="control-toggle">
-            <Switch size="small" checked={useLlm} onChange={setUseLlm} />
-            <span><Sparkles size={12} style={{ verticalAlign: "-1px" }} /> LLM 解释</span>
-          </label>
-        )}
         <Button
           size="small"
           type="primary"
@@ -411,10 +429,10 @@ export function ResourceMatchingWorkbench({
               aria-label="选择历史匹配记录"
               value={activeRunId ?? undefined}
               onChange={(val) => void handleLoadRun(val)}
-              style={{ width: 210 }}
+              style={{ width: 230 }}
               options={runs.map((r) => ({
                 value: r.run_id,
-                label: `方法${r.method} · Top-${r.top_k} · ${new Date(r.created_at).toLocaleTimeString("zh-CN")}`,
+                label: `方法${r.method}${r.llm_mode === "enhanced" ? "+LLM" : ""} · Top-${r.top_k} · ${new Date(r.created_at).toLocaleTimeString("zh-CN")}`,
               }))}
             />
           </div>
@@ -445,11 +463,27 @@ export function ResourceMatchingWorkbench({
             <div className="kpi-chip"><span>Top-1 能力覆盖</span><strong>{Math.round(output.summary.average_top1_capability_coverage * 100)}%</strong></div>
             <div className="kpi-chip"><span>运行耗时</span><strong>{output.summary.total_duration_ms} ms</strong></div>
             <div className="kpi-meta">
-              <span>方法 {output.config.method}</span>
+              <span>方法 {output.config.method}{output.config.llm_mode === "enhanced" ? "+LLM" : ""}</span>
+              {output.run_metadata && (
+                <span>
+                  {output.run_metadata.agent_name ?? "资源匹配智能体"} · Prompt v{output.run_metadata.prompt_version} · LLM {output.summary.llm_calls} 次
+                </span>
+              )}
               <span>资产库 {output.catalog_version}</span>
               <span>上游交接 {output.source_handoff_status}</span>
             </div>
           </div>
+
+          {output.summary.fallback_triggered && output.summary.fallback_reason && (
+            <div className="matching-blocker-banner">
+              <Alert
+                type="warning"
+                showIcon
+                message="LLM 协同已触发安全降级（已保留确定性语义+多约束校验结果）"
+                description={output.summary.fallback_reason}
+              />
+            </div>
+          )}
 
           {!!blockerDiagnostics.length && (
             <div className="matching-blocker-banner">
@@ -511,6 +545,19 @@ export function ResourceMatchingWorkbench({
                   </li>
                 ))}
               </ol>
+              {!!output.feedback_items?.length && (
+                <div className="feedback-panel">
+                  <strong>结构化诊断反馈（不修改上游需求模型）：</strong>
+                  <ul>
+                    {output.feedback_items.map((fb) => (
+                      <li key={fb.feedback_id} data-severity={fb.severity}>
+                        <code>{feedbackSourceLabels[fb.issue_source] ?? fb.issue_source}</code> {fb.message}
+                        <small> → 建议：{fb.suggested_action}</small>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </details>
 
@@ -605,6 +652,25 @@ export function ResourceMatchingWorkbench({
                       <Sparkles size={14} />
                       <span><strong>LLM 匹配说明：</strong>{selectedOp.llm_explanation}</span>
                     </div>
+                  )}
+
+                  {selectedOp.llm_strategy?.triggered && (
+                    <details className="result-disclosure">
+                      <summary>
+                        LLM 语义消歧与检索策略协同记录（触发原因：{selectedOp.llm_strategy.trigger_reasons.join("；")}）
+                      </summary>
+                      <dl className="fact-grid">
+                        <div><dt>推荐资产类别</dt><dd>{selectedOp.llm_strategy.preferred_categories.join("、") || "无"}</dd></div>
+                        <div><dt>建议补充资产（经工具核验）</dt><dd>{selectedOp.llm_strategy.verified_added_asset_ids.join("、") || "无新增"}</dd></div>
+                        <div><dt>拦截幻觉 ID</dt><dd>{selectedOp.llm_strategy.rejected_hallucinated_ids.join("、") || "0"}</dd></div>
+                        <div><dt>硬约束复验淘汰</dt><dd>{selectedOp.llm_strategy.rejected_hard_constraint_ids.join("、") || "0"}</dd></div>
+                      </dl>
+                      {!!selectedOp.llm_strategy.qualitative_refinements.length && (
+                        <ul className="issue-compact-list">
+                          {selectedOp.llm_strategy.qualitative_refinements.map((note, idx) => <li key={idx}>{note}</li>)}
+                        </ul>
+                      )}
+                    </details>
                   )}
 
                   {!!selectedOp.unmet_requirements.length && (

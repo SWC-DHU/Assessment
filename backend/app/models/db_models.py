@@ -30,6 +30,7 @@ class AgentProfile(Base):
     __tablename__ = "agent_profiles"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_type: Mapped[str] = mapped_column(String(40), default="requirement_parsing", nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
@@ -156,6 +157,10 @@ class ResourceMatchingRun(Base):
         String(36), ForeignKey("test_sessions.id", ondelete="CASCADE"), nullable=True, index=True
     )
     semantic_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    agent_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    agent_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    agent_type: Mapped[str] = mapped_column(String(40), default="resource_matching", nullable=False)
+    llm_mode: Mapped[str] = mapped_column(String(24), default="disabled", nullable=False)
     method: Mapped[str] = mapped_column(String(10), default="C", nullable=False)
     matching_status: Mapped[str] = mapped_column(String(32), default="completed", nullable=False)
     catalog_version: Mapped[str] = mapped_column(String(64), default="", nullable=False)

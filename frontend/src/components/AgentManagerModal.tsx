@@ -37,8 +37,12 @@ import type {
   AgentJsonProbeResponse,
   AgentProfile,
   AgentProfilePayload,
+  AgentRoleSpec,
+  AgentType,
   EnvStatus,
   ExtractionSchemaConfig,
+  FallbackPolicy,
+  LLMMode,
   SchemaFieldDef,
   SemanticThinking,
   ThinkingParameter,
@@ -49,20 +53,34 @@ const { Text } = Typography;
 interface AgentManagerModalProps {
   open: boolean;
   agents: AgentProfile[];
-  activeAgentId: string | null;
+  roleSpecs?: AgentRoleSpec[];
+  initialRole?: AgentType;
+  activeAgentIdsByRole: Record<AgentType, string | null>;
   envStatus: EnvStatus | null;
   onClose: () => void;
   onCreateAgent: (payload: AgentProfilePayload) => Promise<AgentProfile>;
   onUpdateAgent: (id: string, payload: Partial<AgentProfilePayload>) => Promise<AgentProfile>;
   onDuplicateAgent: (id: string) => Promise<AgentProfile>;
   onDeleteAgent: (id: string) => Promise<void>;
-  onActivateAgent?: (id: string) => Promise<void>;
+  onActivateAgent?: (id: string, role: AgentType) => Promise<void>;
   onConnectionTested?: (agentId: string, result: AgentConnectionTestResponse) => void;
 }
 
 const defaults: AgentProfile["execution"] = {
-  timeout_seconds: null, request_budget: null, batch_max_tokens: null,
-  semantic_thinking: null, thinking_parameter: "thinking", llm_disambiguation: true,
+  timeout_seconds: null,
+  request_budget: null,
+  batch_max_tokens: null,
+  semantic_thinking: null,
+  thinking_parameter: "thinking",
+  llm_disambiguation: true,
+  fallback_policy: "degrade_deterministic",
+  max_strategy_retries: 1,
+  default_llm_mode: "disabled",
+};
+
+const ROLE_LABELS: Record<AgentType, string> = {
+  requirement_parsing: "需求解析智能体",
+  resource_matching: "资源匹配智能体",
 };
 
 const PROVIDER_PRESETS = [
@@ -93,13 +111,14 @@ function buildFormFromAgent(agent: AgentProfile): AgentProfilePayload {
     json_schema: agent.extraction_schema?.json_schema || {},
   };
   return {
+    agent_type: agent.agent_type || "requirement_parsing",
     name: agent.name,
     description: agent.description,
     base_url: agent.base_url,
     model: agent.model,
     temperature: agent.temperature,
     max_tokens: agent.max_tokens,
-    execution: agent.execution ?? defaults,
+    execution: { ...defaults, ...(agent.execution ?? {}) },
     json_mode: agent.json_mode,
     require_source_quote: agent.require_source_quote,
     system_prompt: agent.system_prompt,
@@ -301,7 +320,9 @@ function FieldTreeEditor({ fields, depth = 0, onChange }: FieldTreeEditorProps) 
 export function AgentManagerModal({
   open,
   agents,
-  activeAgentId,
+  roleSpecs = [],
+  initialRole = "requirement_parsing",
+  activeAgentIdsByRole,
   envStatus,
   onClose,
   onCreateAgent,
@@ -312,6 +333,16 @@ export function AgentManagerModal({
   onConnectionTested,
 }: AgentManagerModalProps) {
   const { message: antdMessage, modal } = AntdApp.useApp();
+  const [activeRole, setActiveRole] = useState<AgentType>(initialRole);
+  const roleAgents = useMemo(
+    () => agents.filter((a) => (a.agent_type || "requirement_parsing") === activeRole),
+    [agents, activeRole]
+  );
+  const activeAgentId = activeAgentIdsByRole[activeRole] ?? null;
+  const activeRoleSpec = useMemo(
+    () => roleSpecs.find((r) => r.agent_type === activeRole) ?? null,
+    [roleSpecs, activeRole]
+  );
   const [selectedId, setSelectedId] = useState<string | null>(activeAgentId);
   const [form, setForm] = useState<AgentProfilePayload | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
@@ -331,8 +362,8 @@ export function AgentManagerModal({
   const loadedSignatureRef = useRef<string | null>(null);
 
   const selectedAgent = useMemo(
-    () => agents.find((a) => a.id === selectedId) || null,
-    [agents, selectedId]
+    () => roleAgents.find((a) => a.id === selectedId) || null,
+    [roleAgents, selectedId]
   );
 
   const loadAgentIntoForm = useCallback((agent: AgentProfile) => {
@@ -347,7 +378,7 @@ export function AgentManagerModal({
     loadedSignatureRef.current = `${agent.id}:${agent.updated_at}`;
   }, []);
 
-  // Initialize selectedId when modal opens; recover if selectedId gets deleted
+  // Initialize activeRole & selectedId when modal opens; recover if selectedId gets deleted
   useEffect(() => {
     if (!open) {
       wasOpenRef.current = false;
@@ -355,18 +386,20 @@ export function AgentManagerModal({
     }
     if (!wasOpenRef.current) {
       wasOpenRef.current = true;
-      const initialId = activeAgentId || agents[0]?.id || null;
+      setActiveRole(initialRole);
+      const list = agents.filter((a) => (a.agent_type || "requirement_parsing") === initialRole);
+      const initialId = activeAgentIdsByRole[initialRole] || list[0]?.id || null;
       setSelectedId(initialId);
-      const target = agents.find((a) => a.id === initialId);
+      const target = list.find((a) => a.id === initialId);
       if (target) loadAgentIntoForm(target);
       return;
     }
-    if (selectedId && !agents.some((a) => a.id === selectedId)) {
-      const fallback = agents[0] || null;
+    if (!selectedId || !roleAgents.some((a) => a.id === selectedId)) {
+      const fallback = roleAgents.find((a) => a.id === activeAgentId) || roleAgents[0] || null;
       setSelectedId(fallback?.id || null);
       if (fallback) loadAgentIntoForm(fallback);
     }
-  }, [open, activeAgentId, agents, selectedId, loadAgentIntoForm]);
+  }, [open, initialRole, activeRole, activeAgentId, activeAgentIdsByRole, agents, roleAgents, selectedId, loadAgentIntoForm]);
 
   // Sync form only when selected agent changes or its persisted version updates
   useEffect(() => {
@@ -407,7 +440,19 @@ export function AgentManagerModal({
     if (id === selectedId) return;
     confirmDiscardIfDirty(() => {
       setSelectedId(id);
-      const target = agents.find((a) => a.id === id);
+      const target = roleAgents.find((a) => a.id === id);
+      if (target) loadAgentIntoForm(target);
+    });
+  };
+
+  const handleSwitchRole = (nextRole: AgentType) => {
+    if (nextRole === activeRole) return;
+    confirmDiscardIfDirty(() => {
+      setActiveRole(nextRole);
+      const nextList = agents.filter((a) => (a.agent_type || "requirement_parsing") === nextRole);
+      const nextId = activeAgentIdsByRole[nextRole] || nextList[0]?.id || null;
+      setSelectedId(nextId);
+      const target = nextList.find((a) => a.id === nextId);
       if (target) loadAgentIntoForm(target);
     });
   };
@@ -419,31 +464,40 @@ export function AgentManagerModal({
   const handleCreateNew = async () => {
     const createFlow = async () => {
       try {
-        const defaultFields: SchemaFieldDef[] = [
-          { name: "product_name", type: "string", description: "产品名称", required: true, children: [] },
-          { name: "operations", type: "array", description: "工序列表", required: true, children: [] },
-        ];
+        const isMatching = activeRole === "resource_matching";
+        const defaultFields: SchemaFieldDef[] = isMatching
+          ? []
+          : [
+              { name: "product_name", type: "string", description: "产品名称", required: true, children: [] },
+              { name: "operations", type: "array", description: "工序列表", required: true, children: [] },
+            ];
         const created = await onCreateAgent({
-          name: "新自定义工艺智能体",
-          description: "用于对比测试的自定义抽取智能体",
+          agent_type: activeRole,
+          name: isMatching ? "新资源匹配智能体" : "新需求解析智能体",
+          description: isMatching
+            ? "独立配置的资源匹配与多约束推理实验智能体"
+            : "用于对比测试的自定义需求解析智能体",
           base_url: "",
           api_key: "",
           model: "",
           temperature: 0.1,
           max_tokens: 4096,
           json_mode: true,
-          require_source_quote: true,
-          system_prompt: "你是一名工业工艺需求解析助手，请从输入文档中提取结构化信息。",
+          require_source_quote: !isMatching,
+          system_prompt: "",
           business_rules: "",
+          execution: isMatching
+            ? { ...defaults, request_budget: 3, timeout_seconds: 60, fallback_policy: "degrade_deterministic", max_strategy_retries: 1 }
+            : defaults,
           extraction_schema: {
             mode: "visual",
             fields: defaultFields,
-            json_schema: fieldsToJsonSchema(defaultFields),
+            json_schema: isMatching ? {} : fieldsToJsonSchema(defaultFields),
           },
         });
         setSelectedId(created.id);
         loadAgentIntoForm(created);
-        antdMessage.success("已创建新智能体，请填写模型连接参数并保存");
+        antdMessage.success(`已创建新的${ROLE_LABELS[activeRole]}配置`);
       } catch (err) {
         antdMessage.error(err instanceof Error ? err.message : "创建智能体失败");
       }
@@ -497,8 +551,8 @@ export function AgentManagerModal({
       const updated = await onUpdateAgent(selectedId, payload);
       loadAgentIntoForm(updated);
       if (activateAfterSave && onActivateAgent) {
-        await onActivateAgent(updated.id);
-        antdMessage.success(`已保存并切换工作台至「${updated.name}」`);
+        await onActivateAgent(updated.id, updated.agent_type || activeRole);
+        antdMessage.success(`已保存并将「${ROLE_LABELS[activeRole]}」切换为「${updated.name}」`);
       } else {
         antdMessage.success("智能体配置已保存");
       }
@@ -729,14 +783,24 @@ export function AgentManagerModal({
       <div className="admin-layout flex h-full overflow-hidden" style={{ borderTop: "1px solid #f0f0f0" }}>
         {/* Left List */}
         <div
-          className="admin-nav w-60 p-3 flex flex-col gap-2 shrink-0"
+          className="admin-nav w-64 p-3 flex flex-col gap-2 shrink-0"
           style={{ background: "#fafafa", borderRight: "1px solid #f0f0f0" }}
         >
+          <Segmented
+            block
+            size="small"
+            value={activeRole}
+            onChange={(val) => handleSwitchRole(val as AgentType)}
+            options={[
+              { value: "requirement_parsing", label: "需求解析" },
+              { value: "resource_matching", label: "资源匹配" },
+            ]}
+          />
           <Button type="primary" block icon={<Plus className="w-3.5 h-3.5" />} onClick={handleCreateNew}>
-            新建智能体
+            新建{activeRole === "resource_matching" ? "匹配" : "解析"}智能体
           </Button>
           <div className="admin-list flex-1 overflow-y-auto space-y-1.5 mt-1">
-            {agents.map((a) => {
+            {roleAgents.map((a) => {
               const active = a.id === selectedId;
               const isWorkbenchActive = a.id === activeAgentId;
               return (
@@ -819,7 +883,7 @@ export function AgentManagerModal({
                   <Button
                     size="small"
                     danger
-                    disabled={agents.length <= 1}
+                    disabled={roleAgents.length <= 1}
                     icon={<Trash2 className="w-3.5 h-3.5" />}
                   >
                     删除
@@ -862,6 +926,21 @@ export function AgentManagerModal({
 
             {/* Scrollable Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-5">
+              {/* Role Contract & Exclusive Tools */}
+              {activeRoleSpec && (
+                <div className="p-3 rounded-md text-xs flex flex-wrap items-center justify-between gap-2"
+                  style={{ background: "#f8f7f4", border: "1px solid #e5e6df" }}>
+                  <div>
+                    <Tag color="green" style={{ marginRight: 6 }}>{activeRoleSpec.display_name} ({activeRoleSpec.agent_type})</Tag>
+                    <span className="text-slate-600">
+                      输入：<code>{activeRoleSpec.input_contract}</code> → 输出：<code>{activeRoleSpec.output_contract}</code>
+                      {" · "}Prompt v{activeRoleSpec.prompt_version}
+                    </span>
+                  </div>
+                  <span className="text-slate-500">专属工具 {activeRoleSpec.tools.length} 项</span>
+                </div>
+              )}
+
               {/* Basic Info */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -1079,22 +1158,72 @@ export function AgentManagerModal({
                       <Text style={{ fontSize: 12 }}>强制 JSON Output</Text>
                     </div>
                   </Tooltip>
-                  <Tooltip title="旧版抽取要求逐字 source_quote。领域语义始终核对来源。">
-                    <div className="flex items-center gap-2 pt-3">
-                      <Switch
-                        size="small"
-                        checked={form.require_source_quote}
-                        onChange={(checked) =>
-                          setForm({ ...form, require_source_quote: checked })
-                        }
-                      />
-                      <Text style={{ fontSize: 12 }}>强制 source_quote</Text>
-                    </div>
-                  </Tooltip>
+                  {activeRole === "requirement_parsing" && (
+                    <Tooltip title="旧版抽取要求逐字 source_quote。领域语义始终核对来源。">
+                      <div className="flex items-center gap-2 pt-3">
+                        <Switch
+                          size="small"
+                          checked={form.require_source_quote}
+                          onChange={(checked) =>
+                            setForm({ ...form, require_source_quote: checked })
+                          }
+                        />
+                        <Text style={{ fontSize: 12 }}>强制 source_quote</Text>
+                      </div>
+                    </Tooltip>
+                  )}
                 </div>
               </Card>
 
-              <Card size="small" title="执行与领域语义">
+              {activeRole === "resource_matching" ? (
+                <Card size="small" title="资源匹配执行策略与调用预算">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label className="flex flex-col gap-1">请求超时（秒）
+                      <InputNumber aria-label="请求超时（秒）" min={1} max={600} placeholder="默认 60 秒"
+                        value={form.execution?.timeout_seconds ?? null} onChange={(value) => setForm({
+                          ...form, execution: { ...defaults, ...form.execution, timeout_seconds: value },
+                        })} />
+                    </label>
+                    <label className="flex flex-col gap-1">单次匹配 LLM 调用预算
+                      <InputNumber aria-label="单次运行请求预算" min={1} max={12} placeholder="默认 3 次"
+                        value={form.execution?.request_budget ?? null} onChange={(value) => setForm({
+                          ...form, execution: { ...defaults, ...form.execution, request_budget: value },
+                        })} />
+                    </label>
+                    <label className="flex flex-col gap-1">默认 LLM 协同模式
+                      <Select<LLMMode> aria-label="默认 LLM 协同模式"
+                        value={form.execution?.default_llm_mode ?? "disabled"}
+                        options={[
+                          { value: "disabled", label: "纯确定性推理（不调用 LLM）" },
+                          { value: "enhanced", label: "LLM 语义消歧与策略协同" },
+                        ]}
+                        onChange={(value) => setForm({
+                          ...form, execution: { ...defaults, ...form.execution, default_llm_mode: value },
+                        })} />
+                    </label>
+                    <label className="flex flex-col gap-1">LLM 不可用 / 失败降级策略
+                      <Select<FallbackPolicy> aria-label="失败降级策略"
+                        value={form.execution?.fallback_policy ?? "degrade_deterministic"}
+                        options={[
+                          { value: "degrade_deterministic", label: "自动降级为纯确定性匹配并提示" },
+                          { value: "fail_fast", label: "立即报错中止（fail_fast）" },
+                        ]}
+                        onChange={(value) => setForm({
+                          ...form, execution: { ...defaults, ...form.execution, fallback_policy: value },
+                        })} />
+                    </label>
+                    <label className="flex flex-col gap-1">未匹配工序策略重试上限
+                      <InputNumber aria-label="策略重试上限" min={0} max={3}
+                        value={form.execution?.max_strategy_retries ?? 1}
+                        onChange={(value) => setForm({
+                          ...form, execution: { ...defaults, ...form.execution, max_strategy_retries: value ?? 1 },
+                        })} />
+                    </label>
+                  </div>
+                  <p className="muted">LLM 提出的检索策略、类别偏好与软约束判定均须通过确定性工具与三值硬约束校验，不得绕过硬约束或修改上游需求。</p>
+                </Card>
+              ) : (
+                <Card size="small" title="执行与领域语义">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <label className="flex flex-col gap-1">请求超时（秒）
                     <InputNumber aria-label="请求超时（秒）" min={1} max={600} placeholder="使用服务默认值"
@@ -1147,7 +1276,8 @@ export function AgentManagerModal({
                     visibleProbe.result.usage.completion_tokens != null && `输出 ${visibleProbe.result.usage.completion_tokens}`,
                     visibleProbe.result.usage.reasoning_tokens != null && `推理 ${visibleProbe.result.usage.reasoning_tokens}`,
                   ].filter(Boolean).join(" · ")} />}
-              </Card>
+                </Card>
+              )}
 
               {/* System Prompt & Rules */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1176,10 +1306,11 @@ export function AgentManagerModal({
                 </div>
               </div>
 
-              {/* Extraction Schema */}
-              <Card
-                size="small"
-                title={<span className="text-xs font-semibold">旧版自定义抽取 Schema</span>}
+              {/* Extraction Schema (requirement_parsing only) */}
+              {activeRole === "requirement_parsing" && (
+                <Card
+                  size="small"
+                  title={<span className="text-xs font-semibold">旧版自定义抽取 Schema</span>}
                 extra={
                   <Space size={8}>
                     {form.extraction_schema.mode === "json_schema" && (
@@ -1246,6 +1377,7 @@ export function AgentManagerModal({
                   </div>
                 )}
               </Card>
+              )}
             </div>
           </div>
         ) : null}

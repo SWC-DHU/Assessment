@@ -11,8 +11,10 @@ from sqlalchemy import delete, select, update
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
+from agents.config import AgentNotFoundError, RoleMismatchError, build_agent_runtime, resolve_agent_profile
 from app.config import settings
 from app.api.agents import agent_execution
+from requirement_parsing.agent import run_requirement_parsing
 from app.database import get_db
 from app.models.db_models import (
     AgentProfile,
@@ -62,12 +64,12 @@ def _get_session_or_404(db: Session, session_id: str) -> TestSession:
 
 
 def _resolve_agent(db: Session, agent_id: str | None) -> AgentProfile:
-    agent = db.get(AgentProfile, agent_id) if agent_id else None
-    if not agent:
-        agent = db.query(AgentProfile).order_by(AgentProfile.created_at.asc()).first()
-    if not agent:
-        raise HTTPException(status_code=400, detail="没有可用的智能体配置")
-    return agent
+    try:
+        return resolve_agent_profile(db, "requirement_parsing", agent_id)
+    except RoleMismatchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404 if agent_id else 400, detail=str(exc)) from exc
 
 
 def _resolve_template(db: Session, template_id: str | None) -> OutputTemplate | None:
@@ -86,8 +88,16 @@ def list_sessions(db: Session = Depends(get_db)) -> list[TestSession]:
 @router.post("", response_model=TestSessionDetail, status_code=status.HTTP_201_CREATED)
 def create_session(payload: TestSessionCreate, db: Session = Depends(get_db)) -> TestSession:
     agent_id = payload.agent_id
-    if not agent_id:
-        first_agent = db.query(AgentProfile).order_by(AgentProfile.created_at.asc()).first()
+    if agent_id:
+        agent = _resolve_agent(db, agent_id)
+        agent_id = agent.id
+    else:
+        first_agent = (
+            db.query(AgentProfile)
+            .filter(AgentProfile.agent_type == "requirement_parsing")
+            .order_by(AgentProfile.created_at.asc())
+            .first()
+        )
         agent_id = first_agent.id if first_agent else None
 
     template_id = payload.template_id
@@ -128,6 +138,8 @@ def update_session(
         (session.current_extracted_json or {}).get("semantic") or (fields["current_extracted_json"] or {}).get("semantic")
     ):
         raise HTTPException(status_code=409, detail="语义版本通过定向修订生成。JSON 编辑仅适用于旧抽取结果。")
+    if "agent_id" in fields and fields["agent_id"] is not None:
+        _resolve_agent(db, fields["agent_id"])
     for key, value in fields.items():
         setattr(session, key, value)
     db.commit()
@@ -404,24 +416,14 @@ async def _execute_extraction_turn(
     run_id = str(uuid.uuid4())
     history = [{"role": m.role, "content": m.content}
                for m in list(session.messages)[:history_limit] if m.status == "success"]
-    execution = agent_execution(db, agent.id)
-    base_url = normalize_base_url(agent.base_url) or settings.default_llm_base_url
-    official_semantic = strategy == "semantic" and is_official_deepseek(base_url)
-    request_budget = DEEPSEEK_REQUEST_BUDGET if official_semantic else settings.llm_request_budget
-    config = ExtractorConfig(
-        base_url=base_url,
-        api_key=agent.api_key.strip() or settings.default_llm_api_key,
-        model=agent.model.strip() or settings.default_llm_model,
-        temperature=agent.temperature, max_tokens=agent.max_tokens, json_mode=agent.json_mode,
-        require_source_quote=agent.require_source_quote, system_prompt=agent.system_prompt,
-        business_rules=agent.business_rules, extraction_schema=agent.extraction_schema or {},
-        timeout_seconds=execution.timeout_seconds or settings.llm_timeout_seconds,
-        request_budget=execution.request_budget or request_budget,
-        semantic_batch_max_tokens=execution.batch_max_tokens,
-        semantic_thinking=execution.semantic_thinking,
-        thinking_parameter=execution.thinking_parameter,
-        llm_disambiguation=execution.llm_disambiguation,
+    runtime = build_agent_runtime(
+        db,
+        agent,
+        expected_type="requirement_parsing",
+        default_budget=settings.llm_request_budget,
+        semantic_strategy=(strategy == "semantic"),
     )
+    config = runtime.llm_config
     if source_message is not None and (not config.api_key or config.base_url.startswith("mock://")):
         raise HTTPException(status_code=409, detail="请先配置在线模型，再继续解析未完成批次。")
     selected_ids = [item.id for item in target_files]
@@ -466,8 +468,9 @@ async def _execute_extraction_turn(
         db.rollback()
         progress = run_progress.get((session_id, run_token))
         try:
-            model, result = await _while_connected(execute(
+            model, result, _, _ = await _while_connected(run_requirement_parsing(
                 config, message_document(user_id, message_text), documents, run_id, base,
+                runtime=runtime,
                 offline=use_demo_fallback or config.base_url.startswith("mock://"), failed=errors,
                 session_id=session_id, publish=(lambda step: progress.append(redact(step, config.api_key)))
                 if progress is not None else None, resume=pending_batches,

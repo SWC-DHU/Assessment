@@ -33,9 +33,13 @@ flowchart LR
 
 ## 持久化与兼容
 
-- 启动通过 SQLAlchemy `create_all` 添加 `semantic_versions`、`template_revisions`、`agent_execution_settings` 和 `resource_matching_runs`。旧表结构、历史消息和上传文件无需迁移。旧模板第一次编辑前会保存原定义为 v1。
-- 模型资产库（`backend/model_assets/`）采用 JSON 文件存储于 `data/`，与三维模型目录 `geometry/` 解耦，支持独立加载与迁移至 Metatwin。
-- 资源匹配智能体（`backend/resource_matching/`）直接消费 `ResourceMatchingInput` 1.0.0，不重复解析原始文档，生成 `ResourceMatchingOutput` 1.0.0 供前端查看及后续关联建模智能体消费。详述见 [资源匹配开发报告](RESOURCE_MATCHING_REPORT.md)。
+## 多智能体分层与持久化兼容
+
+- **智能体独立架构（`backend/agents/`）**：建立 `AgentRoleRegistry`（`registry.py`）、强角色校验配置解析器（`config.py`）、统一 OpenAI 兼容 JSON 客户端（`llm_client.py`）与标准化运行审计元数据/调用预算（`runtime.py`）。系统明确区分 `requirement_parsing`（需求解析）与 `resource_matching`（资源匹配）两类角色，独立管理 LLM 接口、密钥、模型、温度、预算、超时、Prompt、业务规则与专属工具，后端强制校验角色一致性，禁止跨角色混用或隐式回退。
+- **需求解析智能体（`backend/requirement_parsing/`）**：封装经验证的文档解析、确定性抽取、LLM 分批补充、本体映射与工艺拓扑管线，统一输出 `RequirementSemanticModel` 2.2.0 与 `ResourceMatchingInput` 1.0.0，并在调试信息中记录无敏感信息的 `agent_metadata`。
+- **资源匹配智能体（`backend/resource_matching/`）**：独立维护 `prompts/` 模板（v2.0.0），支持纯确定性模式（`llm_mode=disabled`）与 LLM 协同增强模式（`llm_mode=enhanced`）。在增强模式下，LLM 针对未匹配、待确认、设备文本歧义、定性约束和多能力拆分工序提出检索策略与软约束判定，但所有建议必须经过 `verify_llm_strategy_proposal` 确定性门禁（拦截幻觉资产 ID，强制复验三值硬约束，绝不绕过 FAIL/UNKNOWN），同时生成不修改上游需求的结构化诊断反馈（`feedback_items`）。
+- **SQLite 兼容迁移**：启动时自动执行 `create_all` 与幂等 `ensure_schema_migrations`（自动为历史 `agent_profiles` 补建 `agent_type` 列默认回填为 `requirement_parsing`，为 `resource_matching_runs` 补建智能体角色与模式审计列，并自动初始化 `resource_matching` 默认配置），不破坏任何历史会话、消息、版本或上传文件。
+- **共享资源解耦**：`domain_semantics/`（本体与词表）与 `model_assets/`（59 个 synthetic 模型资产）作为跨智能体共享知识与资产层，不绑定特定智能体或 LLM，便于后续扩展关联建模智能体及迁移至 Metatwin 平台。详述见 [资源匹配开发报告](RESOURCE_MATCHING_REPORT.md)。
 - 新运行将规范语义快照保存在版本表，并在现有会话 JSON 中附上展示投影，以兼容旧模板。旧结果继续支持自定义抽取 Schema、原 JSON 编辑及旧版 Mock。可显式转换为新版本。
 - 会话列表和来源校验读取 SQLite。删除原始文件后，既有版本保留当时的引用和状态，重新核验会报告来源不可用。
 - 会话分支记录父版本。定向修订只替换指定工序及参数的未人工确认约束。人工审核可确认任务范围及已有目标产品。重跑语义消息使用原父版本和来源集合。

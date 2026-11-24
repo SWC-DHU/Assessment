@@ -12,6 +12,10 @@ export interface ExtractionSchemaConfig {
   json_schema: Record<string, unknown>;
 }
 
+export type AgentType = "requirement_parsing" | "resource_matching";
+export type FallbackPolicy = "degrade_deterministic" | "fail_fast";
+export type LLMMode = "disabled" | "enhanced";
+
 export type SemanticThinking = "service_default" | "disabled";
 export type ThinkingParameter = "thinking" | "reasoning_effort";
 export type ThinkingResult = "reasoning_returned" | "zero_reported" | "unverified" | "rejected";
@@ -23,9 +27,23 @@ export interface AgentExecutionConfig {
   semantic_thinking: SemanticThinking | null;
   thinking_parameter: ThinkingParameter;
   llm_disambiguation: boolean;
+  fallback_policy?: FallbackPolicy;
+  max_strategy_retries?: number;
+  default_llm_mode?: LLMMode;
+}
+
+export interface AgentRoleSpec {
+  agent_type: AgentType;
+  display_name: string;
+  description: string;
+  input_contract: string;
+  output_contract: string;
+  prompt_version: string;
+  tools: { id: string; input: string; output: string }[];
 }
 
 export interface AgentProfile {
+  agent_type: AgentType;
   execution: AgentExecutionConfig;
   id: string;
   name: string;
@@ -49,6 +67,7 @@ export interface AgentProfile {
 }
 
 export interface AgentProfilePayload {
+  agent_type?: AgentType;
   execution?: AgentExecutionConfig;
   name: string;
   description: string;
@@ -702,11 +721,56 @@ export interface ResourceMatchingConfig {
   top_k: number;
   partial_top_k: number;
   method: MatchingMethod;
+  llm_mode: LLMMode;
   use_llm: boolean;
+  fallback_policy: FallbackPolicy;
+  max_llm_calls: number;
+  max_strategy_retries: number;
   allow_warnings_input: boolean;
   force_blocked_diagnostic: boolean;
   include_rejected_details: boolean;
   weights: ScoringWeights;
+}
+
+export interface AgentRunMetadata {
+  agent_type: AgentType;
+  agent_id?: string | null;
+  agent_name?: string | null;
+  model_requested?: string | null;
+  model_used?: string | null;
+  prompt_version: string;
+  input_version?: string | null;
+  execution_mode: string;
+  config_snapshot: Record<string, unknown>;
+  tool_calls_count: number;
+  llm_calls: number;
+  llm_retries: number;
+  fallback_triggered: boolean;
+  fallback_reason?: string | null;
+  elapsed_ms: number;
+}
+
+export interface LLMStrategyRecord {
+  triggered: boolean;
+  trigger_reasons: string[];
+  proposed_asset_ids: string[];
+  verified_added_asset_ids: string[];
+  rejected_hallucinated_ids: string[];
+  rejected_hard_constraint_ids: string[];
+  preferred_categories: string[];
+  capability_decomposition_hint: string[][];
+  qualitative_refinements: string[];
+  retries_used: number;
+}
+
+export interface StructuredFeedbackItem {
+  feedback_id: string;
+  issue_source: "upstream_requirement" | "asset_catalog_gap" | "constraint_ambiguity" | "llm_runtime";
+  severity: "blocker" | "warning" | "info";
+  operation_ids: string[];
+  message: string;
+  suggested_action: string;
+  mutates_upstream: false;
 }
 
 export interface ConstraintCheckItem {
@@ -785,6 +849,7 @@ export interface OperationMatchingResult {
   pending_candidates: CandidateEvaluation[];
   rejected_candidates: CandidateEvaluation[];
   unmet_requirements: UnmetRequirement[];
+  llm_strategy?: LLMStrategyRecord | null;
   llm_explanation?: string | null;
   diagnostics: string[];
 }
@@ -814,7 +879,10 @@ export interface MatchingSummary {
   average_top1_capability_coverage: number;
   total_duration_ms: number;
   llm_calls: number;
+  llm_retries?: number;
   llm_model_used?: string | null;
+  fallback_triggered?: boolean;
+  fallback_reason?: string | null;
 }
 
 export interface ResourceMatchingOutput {
@@ -829,6 +897,7 @@ export interface ResourceMatchingOutput {
   ontology_version: string;
   vocabulary_version: string;
   config: ResourceMatchingConfig;
+  run_metadata?: AgentRunMetadata | null;
   modeling_task?: ModelingTask | null;
   target_product_ids: string[];
   line_constraints: LineConstraintReference[];
@@ -838,6 +907,7 @@ export interface ResourceMatchingOutput {
   matching_status: "completed" | "completed_with_warnings" | "partial" | "blocked";
   summary: MatchingSummary;
   diagnostics: { code: string; severity: "blocker" | "warning" | "info"; operation_id?: string | null; message: string }[];
+  feedback_items?: StructuredFeedbackItem[];
   tool_trace: { step: string; tool: string; status: string; duration_ms: number; summary: string }[];
 }
 
@@ -845,6 +915,10 @@ export interface MatchingRunSummary {
   run_id: string;
   session_id?: string | null;
   semantic_version_id?: string | null;
+  agent_id?: string | null;
+  agent_name?: string | null;
+  agent_type?: AgentType;
+  llm_mode?: LLMMode;
   method: MatchingMethod;
   matching_status: string;
   catalog_version: string;

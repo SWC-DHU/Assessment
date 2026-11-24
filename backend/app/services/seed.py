@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models.db_models import AgentProfile, OutputTemplate, TestSession
+from agents.registry import (
+    DEFAULT_MATCHING_PROMPT,
+    DEFAULT_MATCHING_RULES,
+    DEFAULT_REQUIREMENT_PROMPT,
+    DEFAULT_REQUIREMENT_RULES,
+)
+from app.models.db_models import AgentExecutionSettings, AgentProfile, OutputTemplate, TestSession
 
 
 PROCESS_EXTRACTION_SCHEMA = {
@@ -210,15 +216,21 @@ SAMPLE_DATASETS = [
 
 
 def seed_initial_data(db: Session) -> None:
-    """Populate initial agents, templates, and a starter session on an empty database."""
-    has_agents = db.query(AgentProfile).first() is not None
+    """Populate initial role-specific agents, templates, and a starter session."""
+    has_req_agents = (
+        db.query(AgentProfile).filter(AgentProfile.agent_type == "requirement_parsing").first() is not None
+    )
+    has_match_agents = (
+        db.query(AgentProfile).filter(AgentProfile.agent_type == "resource_matching").first() is not None
+    )
     has_templates = db.query(OutputTemplate).first() is not None
 
     agent1_id: str | None = None
     tmpl1_id: str | None = None
 
-    if not has_agents:
+    if not has_req_agents:
         agent1 = AgentProfile(
+            agent_type="requirement_parsing",
             name="工业工艺需求解析专家",
             description="严谨抽取产品、工序序列、输入输出物料、工时节拍、前置依赖与未知项，强制要求附带 source_quote 原文定位防幻觉。",
             base_url="",
@@ -228,21 +240,12 @@ def seed_initial_data(db: Session) -> None:
             max_tokens=4096,
             json_mode=True,
             require_source_quote=True,
-            system_prompt=(
-                "你是一名资深的工业制造与工艺工程（IE/PE）需求解析专家。\n"
-                "你的任务是从用户提供的非结构化文本、Excel 表格、Word 文档或 PDF 规格书中，准确抽取工艺需求结构化信息。\n"
-                "核心原则：\n"
-                "1. 严格忠实于原文与表格坐标，严禁凭空捏造工时、物料规格或设备参数。\n"
-                "2. 每道工序、每条约束都必须提供 `source_quote` 字段，尽可能保留文件行号或单元格坐标（如 `Sheet1!B3` 或 `[Row 2]`）。\n"
-                "3. 遇到信息缺失、前后矛盾或口径不清的地方，不要自行猜测，请统一记录到 `unknown_items` 列表中。"
-            ),
-            business_rules=(
-                "- 工时/节拍尽量统一换算为秒（cycle_time_sec，数值类型），若原文单位为分钟请换算为秒并在 quality_requirements 或 notes 中注明原文。\n"
-                "- 工序编号按加工顺序标准化为 OP10、OP20...（若原文已有编号则保留原文编号）。"
-            ),
+            system_prompt=DEFAULT_REQUIREMENT_PROMPT,
+            business_rules=DEFAULT_REQUIREMENT_RULES,
             extraction_schema=PROCESS_EXTRACTION_SCHEMA,
         )
         agent2 = AgentProfile(
+            agent_type="requirement_parsing",
             name="通用需求要点提取器",
             description="面向项目需求说明书与会议纪要，按需求条目拆解分类、优先级与约束，适合与工艺专家对比评测。",
             base_url="",
@@ -264,8 +267,48 @@ def seed_initial_data(db: Session) -> None:
         db.flush()
         agent1_id = agent1.id
     else:
-        first_agent = db.query(AgentProfile).first()
+        first_agent = (
+            db.query(AgentProfile)
+            .filter(AgentProfile.agent_type == "requirement_parsing")
+            .order_by(AgentProfile.created_at.asc())
+            .first()
+        )
         agent1_id = first_agent.id if first_agent else None
+
+    if not has_match_agents:
+        matching_agent = AgentProfile(
+            agent_type="resource_matching",
+            name="资源匹配与约束推理专家",
+            description="消费 ResourceMatchingInput，协同共享本体、模型资产库、三值硬约束校验与 LLM 消歧策略输出各工序 Top-k 候选模型。",
+            base_url="",
+            api_key="",
+            model="",
+            temperature=0.1,
+            max_tokens=4096,
+            json_mode=True,
+            require_source_quote=False,
+            system_prompt=DEFAULT_MATCHING_PROMPT,
+            business_rules=DEFAULT_MATCHING_RULES,
+            extraction_schema={},
+        )
+        db.add(matching_agent)
+        db.flush()
+        db.merge(
+            AgentExecutionSettings(
+                agent_id=matching_agent.id,
+                config={
+                    "timeout_seconds": 60,
+                    "request_budget": 3,
+                    "batch_max_tokens": None,
+                    "semantic_thinking": None,
+                    "thinking_parameter": "thinking",
+                    "llm_disambiguation": True,
+                    "fallback_policy": "degrade_deterministic",
+                    "max_strategy_retries": 1,
+                    "default_llm_mode": "disabled",
+                },
+            )
+        )
 
     if not has_templates:
         tmpl_a = OutputTemplate(

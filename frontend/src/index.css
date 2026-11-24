@@ -948,6 +948,38 @@ button:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus
   flex: none;
   margin: 10px 20px 0;
 }
+.agent-role-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-faint);
+  color: var(--accent);
+  white-space: nowrap;
+}
+.header-shared-note {
+  font-size: 11px;
+  color: var(--subtle);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.feedback-panel {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  font-size: 12px;
+}
+.feedback-panel ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+.feedback-panel li[data-severity="blocker"] { color: var(--error); }
+.feedback-panel li[data-severity="warning"] { color: var(--warning); }
+.feedback-panel small { color: var(--subtle); }
 
 /* ===== Detail Panels & Tables ===== */
 .detail-content { display: grid; gap: 14px; max-width: 1120px; }
