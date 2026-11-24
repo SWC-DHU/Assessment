@@ -85,7 +85,8 @@ def update_agent(agent_id: str, payload: AgentProfileUpdate, db: Session = Depen
 
     update_data = payload.model_dump(exclude_none=True, exclude={"execution"})
     if payload.execution is not None:
-        save_execution(db, agent.id, payload.execution)
+        current = agent_execution(db, agent.id)
+        save_execution(db, agent.id, current.model_copy(update=payload.execution.model_dump(exclude_unset=True)))
     for k, v in update_data.items():
         setattr(agent, k, v)
 

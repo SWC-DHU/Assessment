@@ -35,17 +35,19 @@ from app.models.schemas import (
 from app.services.llm_extractor import (
     ExtractorConfig,
     FileInputContext,
+    is_official_deepseek,
     normalize_base_url,
     run_extraction,
 )
 from app.services.parser import parse_file_bytes
+from app.services.extraction_batches import ResumeSourceError
 from app.services.seed import SAMPLE_DATASETS
 from app.services.template_filler import render_template
 from app.services.redaction import redact
-from app.services.semantic_execution import execute
+from app.services.semantic_execution import DEEPSEEK_REQUEST_BUDGET, execute
 from domain_semantics.pipeline import timestamp, trace
 from domain_semantics.projection import template_context
-from domain_semantics.schema import SemanticModel
+from domain_semantics.schema import BatchReport, SemanticModel
 from app.services.source_inputs import uploaded_document
 from domain_semantics.sources import digest, message_document
 
@@ -377,6 +379,8 @@ async def _execute_extraction_turn(
     use_demo_fallback: bool = False, strategy: str = "semantic",
     run_token: uuid.UUID | None = None,
     history_limit: int | None = None,
+    source_message: ChatMessage | None = None,
+    pending_batches: list[BatchReport] | None = None,
 ) -> RunChatResponse:
     if cancelled.is_set():
         raise HTTPException(status_code=499, detail="运行已停止")
@@ -384,7 +388,7 @@ async def _execute_extraction_turn(
     session_id, observed_update = session.id, session.updated_at
     if file_ids and set(file_ids) - {f.id for f in session.files}:
         raise HTTPException(status_code=404, detail="部分文件已删除或不属于当前会话")
-    target_files = [f for f in session.files if not file_ids or f.id in file_ids]
+    target_files = [f for f in session.files if f.id in file_ids or (not file_ids and source_message is None)]
     if not message_text.strip() and not target_files:
         raise HTTPException(status_code=400, detail="请输入文本指令或上传至少一份文件")
     failed_files = [f for f in target_files if f.parse_status != "success"]
@@ -396,21 +400,28 @@ async def _execute_extraction_turn(
     title = session.title
     if title in {"新建工艺解析测试", "新测试会话", "未命名测试会话"}:
         title = message_text.strip()[:28] or f"解析：{target_files[0].filename[:24]}"
-    user_id, run_id = str(uuid.uuid4()), str(uuid.uuid4())
+    user_id = source_message.id if source_message else str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
     history = [{"role": m.role, "content": m.content}
                for m in list(session.messages)[:history_limit] if m.status == "success"]
     execution = agent_execution(db, agent.id)
+    base_url = normalize_base_url(agent.base_url) or settings.default_llm_base_url
+    official_semantic = strategy == "semantic" and is_official_deepseek(base_url)
+    request_budget = DEEPSEEK_REQUEST_BUDGET if official_semantic else settings.llm_request_budget
     config = ExtractorConfig(
-        base_url=normalize_base_url(agent.base_url) or settings.default_llm_base_url,
+        base_url=base_url,
         api_key=agent.api_key.strip() or settings.default_llm_api_key,
         model=agent.model.strip() or settings.default_llm_model,
         temperature=agent.temperature, max_tokens=agent.max_tokens, json_mode=agent.json_mode,
         require_source_quote=agent.require_source_quote, system_prompt=agent.system_prompt,
         business_rules=agent.business_rules, extraction_schema=agent.extraction_schema or {},
         timeout_seconds=execution.timeout_seconds or settings.llm_timeout_seconds,
-        request_budget=execution.request_budget or settings.llm_request_budget,
+        request_budget=execution.request_budget or request_budget,
+        semantic_batch_max_tokens=execution.batch_max_tokens,
         llm_disambiguation=execution.llm_disambiguation,
     )
+    if source_message is not None and (not config.api_key or config.base_url.startswith("mock://")):
+        raise HTTPException(status_code=409, detail="请先配置在线模型，再继续解析未完成批次。")
     selected_ids = [item.id for item in target_files]
     agent_id, agent_name = agent.id, agent.name
     template_config = None if template is None else dict(
@@ -418,9 +429,13 @@ async def _execute_extraction_turn(
         jinja_content=template.jinja_content, table_config=template.table_config or {},
     )
     user_content = (message_text if message_text.strip() else "") or f"（上传并解析文件：{', '.join(f.filename for f in target_files)}）"
-    user_msg = ChatMessage(id=user_id, session_id=session_id, role="user", content=user_content,
-                           file_ids=selected_ids, agent_id=agent_id, agent_name=agent_name, status="success")
+    user_msg = source_message or ChatMessage(id=user_id, session_id=session_id, role="user", content=user_content,
+                                             file_ids=selected_ids, agent_id=agent_id, agent_name=agent_name, status="success")
     base = model_version(current_state)
+    active_model = (session.current_extracted_json or {}).get("semantic")
+    can_activate = source_message is None or (
+        base is not None and isinstance(active_model, dict) and active_model.get("run_id") == base.run_id
+    )
     parsing_stages = [dict(f.parsed_preview["parse_stage"], file_id=f.id)
                       for f in target_files if f.parsed_preview.get("parse_stage")]
     if not parsing_stages:
@@ -448,12 +463,15 @@ async def _execute_extraction_turn(
         ])
         db.rollback()
         progress = run_progress.get((session_id, run_token))
-        model, result = await _while_connected(execute(
-            config, message_document(user_id, message_text), documents, run_id, base,
-            offline=use_demo_fallback or config.base_url.startswith("mock://"), failed=errors,
-            session_id=session_id, publish=(lambda step: progress.append(redact(step, config.api_key)))
-            if progress is not None else None,
-        ), request, cancelled)
+        try:
+            model, result = await _while_connected(execute(
+                config, message_document(user_id, message_text), documents, run_id, base,
+                offline=use_demo_fallback or config.base_url.startswith("mock://"), failed=errors,
+                session_id=session_id, publish=(lambda step: progress.append(redact(step, config.api_key)))
+                if progress is not None else None, resume=pending_batches,
+            ), request, cancelled)
+        except ResumeSourceError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         if model:
             exported = timestamp()
             result.extracted_json = template_context(model)
@@ -470,6 +488,8 @@ async def _execute_extraction_turn(
         run_id=run_id, input_message_id=user_id, original_instruction=message_text,
         strategy=strategy, offline=use_demo_fallback or config.base_url.startswith("mock://"),
     )
+    if source_message is not None and base is not None:
+        result.debug_info["resumed_from_version_id"] = base.run_id
     result.debug_info["pipeline_stages"] = [
         *parsing_stages,
         input_stage,
@@ -480,13 +500,14 @@ async def _execute_extraction_turn(
         patch["template_id"] = template_config["template_id"]
     if result.status in {"success", "partial"} and result.extracted_json is not None:
         patch["current_extracted_json"] = result.extracted_json
-    activated = db.execute(update(TestSession).where(
+    activated = can_activate and db.execute(update(TestSession).where(
         TestSession.id == session_id, TestSession.updated_at == observed_update,
     ).values(**patch)).rowcount == 1
     db.expire_all()
     current = _get_session_or_404(db, session_id).current_extracted_json
     if not activated:
-        result.debug_info["activation_note"] = "会话已被其他请求更新，本次结果仅保留在历史记录。"
+        result.debug_info["activation_note"] = ("会话已被其他请求更新，本次结果仅保留在历史记录。" if can_activate
+                                                  else "续跑的基础版本已不是当前结果，本次结果保留在历史记录。")
 
     assistant_msg = ChatMessage(
         id=run_id, session_id=session_id, role="assistant",
@@ -494,7 +515,9 @@ async def _execute_extraction_turn(
         file_ids=selected_ids, agent_id=agent_id, agent_name=agent_name,
         status=result.status, extracted_json=result.extracted_json,
     )
-    db.add_all([user_msg, assistant_msg])
+    if source_message is None:
+        db.add(user_msg)
+    db.add(assistant_msg)
     if model:
         db.add(SemanticVersion(id=run_id, session_id=session_id, message_id=user_id, model=model.model_dump(mode="json")))
     db.flush()
@@ -601,4 +624,43 @@ async def rerun_turn(
             request=request, cancelled=cancelled, strategy=debug.get("strategy", "legacy"), history_limit=user_idx,
             run_token=run_token,
             use_demo_fallback=use_demo_fallback,
+        )
+
+
+@router.post("/{session_id}/resume/{message_id}", response_model=RunChatResponse)
+async def resume_turn(
+    session_id: str,
+    message_id: str,
+    request: Request,
+    run_token: uuid.UUID | None = None,
+    db: Session = Depends(get_db),
+) -> RunChatResponse:
+    session = _get_session_or_404(db, session_id)
+    target = db.get(ChatMessage, message_id)
+    if not target or target.session_id != session_id or target.role != "assistant":
+        raise HTTPException(status_code=404, detail="运行结果不存在")
+    debug = target.debug_info or {}
+    version = db.get(SemanticVersion, message_id)
+    if debug.get("strategy") != "semantic" or target.status != "partial" or not version or version.session_id != session_id:
+        raise HTTPException(status_code=409, detail="此结果没有可继续解析的批次。")
+    source = db.get(ChatMessage, version.message_id)
+    if not source or source.session_id != session_id or source.role != "user":
+        raise HTTPException(status_code=409, detail="原始消息不可用，无法继续解析。")
+
+    base = SemanticModel.model_validate(version.model)
+    file_ids = list(source.file_ids or [])
+    source_ids = {source.id, *file_ids}
+    pending = [batch for batch in base.metadata.batches if batch.status != "complete" and batch.fragments
+               and batch.reason != "review_required" and set(batch.source_ids) <= source_ids]
+    if not pending:
+        raise HTTPException(status_code=409, detail="此结果没有可继续解析的批次。")
+    instruction = source.content if any(ref.document_id == source.id for ref in base.source_refs) else ""
+    agent = _resolve_agent(db, session.agent_id)
+    template = _resolve_template(db, session.template_id)
+    with track_run(session_id, run_token) as cancelled:
+        return await _execute_extraction_turn(
+            db=db, session=session, message_text=instruction, file_ids=file_ids,
+            agent=agent, template=template, current_state={"semantic": version.model},
+            request=request, cancelled=cancelled, run_token=run_token,
+            source_message=source, pending_batches=pending,
         )

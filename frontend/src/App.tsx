@@ -362,7 +362,7 @@ export default function App() {
     abortRef.current?.abort();
   };
 
-  const handleRerunMessage = async (messageId: string) => {
+  const handleRerunMessage = async (messageId: string, resume = false) => {
     if (!activeSession || abortRef.current) return;
     setBannerError(null);
     const controller = new AbortController();
@@ -373,18 +373,17 @@ export default function App() {
     setStage("extracting");
 
     try {
-      const res = await api.rerunTurn(
-        activeSession.id,
-        messageId,
-        demoMode,
-        controller.signal,
-        token
-      );
+      const res = resume
+        ? await api.resumeTurn(activeSession.id, messageId, controller.signal, token)
+        : await api.rerunTurn(activeSession.id, messageId, demoMode, controller.signal, token);
       await loadSessionDetail(activeSession.id);
       await refreshSessionsList();
       setSelectedDebugMessageId(res.assistant_message.id);
       if (res.template_preview) {
         setTemplatePreview(res.template_preview);
+      }
+      if (resume && res.assistant_message.debug_info?.activation_note) {
+        antdMessage.info(res.assistant_message.debug_info.activation_note);
       }
       setStage("done");
     } catch (err) {
@@ -591,7 +590,7 @@ export default function App() {
             samples={samples} stage={stage} isRunning={isRunning} progress={progress} demoMode={demoMode} onToggleDemoMode={setDemoMode}
             onUploadFiles={handleUploadFiles} onLoadSampleText={() => {}} onLoadSampleCsv={handleLoadSampleCsv}
             onPreviewFile={setPreviewFile} onSendMessage={handleSendMessage} onAbortRun={handleAbortRun}
-            onRerunMessage={handleRerunMessage} onClearSession={handleClearSession}
+            onRerunMessage={handleRerunMessage} onResumeMessage={(id) => handleRerunMessage(id, true)} onClearSession={handleClearSession}
             onSelectDebugMessage={(id) => { setSelectedDebugMessageId(id); openResults("debug"); }}
             onOpenAgentManager={() => setAgentModalOpen(true)}
             onOpenResult={(id) => { void handleInspect(id); openResults("overview"); }}

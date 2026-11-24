@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from app.services.extraction_batches import MAX_BATCH_CHARS, plan_batches, recovered_rows
+from app.services.extraction_batches import MAX_BATCH_CHARS, ResumeSourceError, plan_batches, recovered_rows, resume_batches
 from app.services.llm_extractor import ExtractionResult, ExtractorConfig
 from app.services.parser import parse_file_bytes, parse_file_path
-from app.services.semantic_execution import execute
+from app.services.semantic_execution import execute, unprocessed
 from domain_semantics.catalog import check_ontology, normalize_term, query_ontology
 from domain_semantics.pipeline import project
 from domain_semantics.schema import RequirementSemanticModel
@@ -71,6 +71,18 @@ def test_batch_limits_do_not_drop_long_source_and_complete_fragments_are_salvage
     assert all(batch.fragments[0].key == "message" for batch in batches)
     assert recovered_rows('{"operations":[{"name":"清洗"},{"name":"') == {"operations": [{"name": "清洗"}]}
     assert not recovered_rows('{"operations":[{"name":"清')
+
+
+def test_resume_recovers_exact_subrange_of_a_single_long_fragment():
+    source = message_document("test", "检查装配参数" * 110 + "确认设备校准状态" * 40)
+    original, = plan_batches([source], set())
+    _, pending = original.split()
+    report = unprocessed(pending, "request_budget_exhausted")
+    resumed, = resume_batches([source], [report])
+    assert resumed.fragments == pending.fragments
+    assert resumed.size < original.size
+    with pytest.raises(ResumeSourceError):
+        resume_batches([message_document("test", "其他内容")], [report])
 
 
 @pytest.mark.asyncio

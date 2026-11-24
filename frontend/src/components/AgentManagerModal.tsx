@@ -57,15 +57,24 @@ interface AgentManagerModalProps {
   onConnectionTested?: (agentId: string, result: AgentConnectionTestResponse) => void;
 }
 
-const defaults = { timeout_seconds: null, request_budget: null, llm_disambiguation: true };
+const defaults = { timeout_seconds: null, request_budget: null, batch_max_tokens: null, llm_disambiguation: true };
 
 const PROVIDER_PRESETS = [
   { label: "OpenAI", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini" },
-  { label: "DeepSeek", base_url: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+  { label: "DeepSeek", base_url: "https://api.deepseek.com/v1", model: "deepseek-flash" },
   { label: "Qwen (百炼)", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
   { label: "Ollama (本地)", base_url: "http://localhost:11434/v1", model: "qwen2.5:14b" },
   { label: "离线 Mock", base_url: "mock://demo", model: "mock-demo" },
 ];
+
+function isOfficialDeepSeek(baseUrl: string) {
+  try {
+    const url = new URL(baseUrl);
+    return url.protocol === "https:" && url.hostname === "api.deepseek.com";
+  } catch {
+    return false;
+  }
+}
 
 function emptyField(): SchemaFieldDef {
   return { name: "", type: "string", description: "", required: false, children: [] };
@@ -618,7 +627,11 @@ export function AgentManagerModal({
     if (!form || !selectedAgent) return;
     const prevUrl = form.base_url.trim();
     const isSwitchingProvider = prevUrl !== "" && prevUrl !== preset.base_url;
-    setForm({ ...form, base_url: preset.base_url, model: preset.model });
+    setForm({
+      ...form, base_url: preset.base_url, model: preset.model,
+      max_tokens: isOfficialDeepSeek(preset.base_url) && form.max_tokens === 4096
+        ? envStatus?.deepseek_semantic_batch_max_tokens ?? 8192 : form.max_tokens,
+    });
     setTestResult(null);
     setAvailableModels([]);
     if (
@@ -653,6 +666,13 @@ export function AgentManagerModal({
     }
     return <Tag color="error">未配置 API Key</Tag>;
   };
+
+  const officialDeepSeek = isOfficialDeepSeek(form?.base_url.trim() || envStatus?.default_base_url || "");
+  const defaultBatchLimit = officialDeepSeek ? envStatus?.deepseek_semantic_batch_max_tokens ?? 8192
+    : envStatus?.semantic_batch_max_tokens ?? 4096;
+  const defaultRequestBudget = officialDeepSeek ? envStatus?.deepseek_semantic_request_budget ?? 4
+    : envStatus?.semantic_request_budget ?? 2;
+  const batchLimit = form?.execution?.batch_max_tokens ?? defaultBatchLimit;
 
   return (
     <Modal
@@ -1007,6 +1027,7 @@ export function AgentManagerModal({
                       Max Tokens
                     </Text>
                     <InputNumber
+                      aria-label="Max Tokens"
                       min={64}
                       max={128000}
                       step={256}
@@ -1014,6 +1035,7 @@ export function AgentManagerModal({
                       onChange={(v) => setForm({ ...form, max_tokens: Number(v) || 4096 })}
                       style={{ width: "100%", fontFamily: "monospace" }}
                     />
+                    <small className="muted">语义抽取每批实际发送 {Math.min(form.max_tokens, batchLimit).toLocaleString()} tokens</small>
                   </div>
                   <Tooltip title="开启后发送 response_format: json_object；不支持的代理将自动降级">
                     <div className="flex items-center gap-2 pt-3">
@@ -1041,7 +1063,7 @@ export function AgentManagerModal({
               </Card>
 
               <Card size="small" title="执行与领域语义">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <label className="flex flex-col gap-1">请求超时（秒）
                     <InputNumber aria-label="请求超时（秒）" min={1} max={600} placeholder="使用服务默认值"
                       value={form.execution?.timeout_seconds ?? null} onChange={(value) => setForm({
@@ -1049,9 +1071,15 @@ export function AgentManagerModal({
                       })} />
                   </label>
                   <label className="flex flex-col gap-1">单次运行请求预算
-                    <InputNumber aria-label="单次运行请求预算" min={1} max={32} placeholder="使用服务默认值"
+                    <InputNumber aria-label="单次运行请求预算" min={1} max={32} placeholder={`默认 ${defaultRequestBudget}`}
                       value={form.execution?.request_budget ?? null} onChange={(value) => setForm({
                         ...form, execution: { ...defaults, ...form.execution, request_budget: value },
+                      })} />
+                  </label>
+                  <label className="flex flex-col gap-1">语义抽取单批输出上限
+                    <InputNumber aria-label="语义抽取单批输出上限" min={64} max={128000} placeholder={`默认 ${defaultBatchLimit}`}
+                      value={form.execution?.batch_max_tokens ?? null} onChange={(value) => setForm({
+                        ...form, execution: { ...defaults, ...form.execution, batch_max_tokens: value },
                       })} />
                   </label>
                   <div className="flex flex-col gap-2">
@@ -1061,6 +1089,7 @@ export function AgentManagerModal({
                   </div>
                 </div>
                 <p className="muted">分批抽取、格式降级、局部修复和消歧共享请求预算。当前领域 Schema、本体和词表版本可在结果概览查看。</p>
+                {officialDeepSeek && <p className="muted">DeepSeek 官方接口的语义事实抽取使用非思考模式。</p>}
               </Card>
 
               {/* System Prompt & Rules */}

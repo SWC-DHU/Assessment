@@ -32,6 +32,7 @@ class ExtractionSchemaConfig(BaseModel):
 class AgentExecutionConfig(BaseModel):
     timeout_seconds: int | None = Field(default=None, ge=1, le=600)
     request_budget: int | None = Field(default=None, ge=1, le=32)
+    batch_max_tokens: int | None = Field(default=None, ge=64, le=128000)
     llm_disambiguation: bool = True
 
 

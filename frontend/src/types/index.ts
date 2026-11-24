@@ -15,6 +15,7 @@ export interface ExtractionSchemaConfig {
 export interface AgentExecutionConfig {
   timeout_seconds: number | null;
   request_budget: number | null;
+  batch_max_tokens: number | null;
   llm_disambiguation: boolean;
 }
 
@@ -118,6 +119,24 @@ export interface UploadedFile {
   created_at: string;
 }
 
+interface TokenUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  reasoning_tokens?: number;
+  total_tokens?: number;
+}
+
+interface ProviderAttempt {
+  batch_id?: string;
+  stage?: string;
+  max_tokens?: number;
+  request_count?: number;
+  finish_reason?: string | null;
+  error_code?: string;
+  thinking?: "disabled";
+  usage?: TokenUsage;
+}
+
 export interface DebugInfo {
   pipeline_stages?: PipelineStage[];
   batches?: ExtractionBatch[];
@@ -129,8 +148,11 @@ export interface DebugInfo {
   requested_model?: string;
   request_count?: number;
   request_budget?: number;
+  max_tokens?: number;
+  batch_max_tokens?: number;
   prompt_version?: string;
-  provider_attempts?: unknown[];
+  provider_attempts?: ProviderAttempt[];
+  resumed_from_version_id?: string;
   input_digest?: string;
   activation_note?: string;
   system_prompt?: string;
@@ -138,11 +160,7 @@ export interface DebugInfo {
   raw_response?: string;
   validation_errors?: string[];
   duration_ms?: number;
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-  };
+  usage?: TokenUsage;
   model_used?: string;
   base_url?: string;
   error_message?: string | null;
@@ -224,6 +242,10 @@ export interface EnvStatus {
   has_default_api_key: boolean;
   default_base_url: string;
   default_model: string;
+  semantic_batch_max_tokens: number;
+  semantic_request_budget: number;
+  deepseek_semantic_batch_max_tokens: number;
+  deepseek_semantic_request_budget: number;
 }
 
 export type ReviewState = "verified" | "pending" | "conflict" | "invalid" | "unprocessed";
@@ -372,6 +394,7 @@ export interface ExtractionBatch {
   input_characters: number;
   accepted_rows: number;
   reason?: string | null;
+  fragments?: string[];
 }
 export interface QuantitySpecification { value: number; unit: string; basis?: string }
 export interface ProcessGraph {

@@ -37,6 +37,11 @@ def normalize_base_url(raw_url: str) -> str:
     return url
 
 
+def is_official_deepseek(base_url: str) -> bool:
+    endpoint = urlsplit(base_url.strip())
+    return endpoint.scheme == "https" and endpoint.hostname == "api.deepseek.com"
+
+
 def _is_response_format_error(exc: APIStatusError) -> bool:
     if exc.status_code not in (400, 422):
         return False
@@ -61,6 +66,8 @@ class ExtractorConfig:
     llm_disambiguation: bool = True
     domain_instruction: str = ""
     plain_instruction: str = ""
+    semantic_batch_max_tokens: int | None = None
+    disable_thinking: bool = False
 
 
 @dataclass
@@ -549,6 +556,10 @@ async def _run_extraction(config, user_message, files, current_state, conversati
     }
     if config.json_mode:
         kwargs["response_format"] = {"type": "json_object"}
+    if config.disable_thinking and is_official_deepseek(effective_base_url):
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        debug_info["thinking"] = "disabled"
+    debug_info["max_tokens"] = config.max_tokens
 
     raw_response = ""
     usage_dict: dict[str, Any] = {}
@@ -577,6 +588,10 @@ async def _run_extraction(config, user_message, files, current_state, conversati
                 "completion_tokens": resp.usage.completion_tokens,
                 "total_tokens": resp.usage.total_tokens,
             }
+            details = getattr(resp.usage, "completion_tokens_details", None)
+            reasoning_tokens = getattr(details, "reasoning_tokens", None)
+            if isinstance(reasoning_tokens, int):
+                usage_dict["reasoning_tokens"] = reasoning_tokens
     except AuthenticationError as exc:
         debug_info.update(error_code="authentication_failed", status_code=401)
         err = f"大模型鉴权失败 (HTTP 401)：请检查 API Key 是否正确。详情：{exc}"
@@ -646,7 +661,7 @@ async def _run_extraction(config, user_message, files, current_state, conversati
         debug_info["validation_errors"] = [json_err or "JSON 解析失败"]
         debug_info["error_code"] = "invalid_json"
         if debug_info.get("finish_reason") == "length":
-            err = "模型输出达到 Token 限制，未形成完整 JSON。请提高 Max Tokens 或缩小单次解析范围。"
+            err = f"模型输出达到本次请求的长度限制（max_tokens={config.max_tokens}），未形成完整 JSON。"
             debug_info.update(error_message=err, error_code="output_truncated")
         return ExtractionResult(status="error", error_message=err, debug_info=debug_info)
 

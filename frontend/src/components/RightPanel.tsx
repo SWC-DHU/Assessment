@@ -99,14 +99,32 @@ function DebugView({ message }: { message: ChatMessage | null }) {
     {debug.error_message && <Alert type="error" showIcon title={debug.error_code ?? "执行错误"} description={debug.error_message} />}
     {debug.activation_note && <Alert type="warning" title={debug.activation_note} />}
     <div className="runtime-metrics">
+      {debug.resumed_from_version_id && <span>续跑自版本 <b title={debug.resumed_from_version_id}>{debug.resumed_from_version_id.slice(0, 8)}</b></span>}
       <span>请求 <b>{debug.request_count ?? "未记录"}</b>{debug.request_budget != null && ` / ${debug.request_budget}`}</span>
       <span>Token <b>{debug.usage?.total_tokens ?? "未返回"}</b></span>
+      {debug.max_tokens != null && <span>配置上限 <b>{debug.max_tokens.toLocaleString()}</b></span>}
+      {debug.batch_max_tokens != null && <span>单批发送上限 <b>{debug.batch_max_tokens.toLocaleString()}</b></span>}
       {debug.finish_reason && <span>结束原因 <b>{debug.finish_reason}</b></span>}
       <span>阶段耗时 <b>{debug.duration_ms != null ? `${debug.duration_ms} ms` : "未记录"}</b></span>
     </div>
+    {!!debug.provider_attempts?.length && <details className="result-disclosure" open><summary>模型调用 · {debug.provider_attempts.length} 项</summary>
+      <div className="batch-list">{debug.provider_attempts.map((attempt, index) => <article key={index}>
+        <div><strong>{attempt.batch_id ?? `第 ${index + 1} 项`}</strong>
+          {attempt.stage && ` · ${stageLabels[attempt.stage] ?? attempt.stage}`}<br />
+          <small>{[
+            (attempt.max_tokens ?? debug.batch_max_tokens) != null && `发送上限 ${(attempt.max_tokens ?? debug.batch_max_tokens)?.toLocaleString()}`,
+            attempt.usage?.prompt_tokens != null && `输入 ${attempt.usage.prompt_tokens.toLocaleString()}`,
+            attempt.usage?.completion_tokens != null && `输出 ${attempt.usage.completion_tokens.toLocaleString()}`,
+            attempt.usage?.reasoning_tokens != null && `推理 ${attempt.usage.reasoning_tokens.toLocaleString()}`,
+            attempt.thinking === "disabled" && "思考已关闭",
+            attempt.finish_reason && `结束原因 ${attempt.finish_reason}`,
+            !attempt.finish_reason && attempt.error_code,
+            attempt.request_count != null && `${attempt.request_count} 次请求`,
+          ].filter(Boolean).join(" · ")}</small></div>
+      </article>)}</div></details>}
     {!!debug.batches?.length && <details className="result-disclosure" open><summary>抽取批次 · {debug.batches.length}</summary>
       <div className="batch-list">{debug.batches.map((batch) => <article key={batch.id}>
-        <div><strong>{batch.id}</strong> · {batch.scope}<br /><small>{batch.input_characters} 字符 · {batch.accepted_rows} 条候选 {batch.reason && `· ${batch.reason}`}</small></div>
+        <div><strong>{batch.id}</strong> · {batch.scope}<br /><small>{batch.input_characters} 字符 · {batch.accepted_rows} 条候选 {batch.reason && `· ${batchReasons[batch.reason] ?? batch.reason}`}</small></div>
         <ReviewPill state={batch.status} />
       </article>)}</div></details>}
     <ol className="run-stages">
@@ -183,10 +201,14 @@ const batchReasons: Record<string, string> = {
   offline: "离线运行已跳过剩余自然语言",
   unconfigured: "模型连接尚未配置",
   review_required: "需要先明确修订对象",
-  request_budget_exhausted: "本轮模型调用预算已用完",
-  output_truncated: "模型响应达到长度限制",
+  request_budget_exhausted: "本轮模型请求预算已用完，本批尚未执行",
+  output_truncated: "本批模型输出达到长度限制",
   semantic_evidence_pending: "部分候选缺少可核验的原文依据",
   service_unavailable: "模型服务暂不可用",
+};
+const batchTips: Record<string, string> = {
+  output_truncated: "检查实际发送的单批输出上限。调整后可继续解析未完成批次。",
+  request_budget_exhausted: "增加单次运行请求预算，然后继续解析未完成批次。",
 };
 
 function IssuesView({ model, issues, onLocate, onSource }: {
@@ -212,7 +234,7 @@ function IssuesView({ model, issues, onLocate, onSource }: {
       const evidence = edge?.evidence ?? entity?.evidence ?? [];
       const cite = evidence[0];
       const name = cite && model?.source_refs.find((source) => source.document_id === cite.document_id)?.name;
-      const tip = issueTips[issue.code] ?? (issue.code.startsWith("batch_")
+      const tip = (batch?.reason ? batchTips[batch.reason] : undefined) ?? issueTips[issue.code] ?? (issue.code.startsWith("batch_")
         ? "检查资料及模型连接，然后重跑对应解析。"
         : "对照原文补充或确认受影响的字段，然后重新核验。");
       return <article key={`${issue.path}-${issue.code}-${index}`}>

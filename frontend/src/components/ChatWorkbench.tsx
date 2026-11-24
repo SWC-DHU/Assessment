@@ -43,6 +43,7 @@ interface ChatWorkbenchProps {
   onSendMessage: (text: string, attachedFileIds: string[]) => Promise<void>;
   onAbortRun: () => void;
   onRerunMessage: (messageId: string) => Promise<void>;
+  onResumeMessage: (messageId: string) => Promise<void>;
   onClearSession: () => Promise<void>;
   onSelectDebugMessage: (messageId: string) => void;
   onOpenAgentManager?: () => void;
@@ -70,6 +71,7 @@ export function ChatWorkbench({
   onSendMessage,
   onAbortRun,
   onRerunMessage,
+  onResumeMessage,
   onClearSession,
   onSelectDebugMessage,
   onOpenAgentManager,
@@ -238,6 +240,9 @@ export function ChatWorkbench({
         ) : (
           messages.map((msg) => {
             const isUser = msg.role === "user";
+            const canResume = msg.status === "partial" && msg.debug_info?.strategy === "semantic"
+              && msg.debug_info.batches?.some((batch) => batch.status !== "complete"
+                && batch.reason !== "review_required" && Boolean(batch.fragments?.length));
             const attachedFiles = (msg.file_ids || [])
               .map((fid) => fileMap.get(fid))
               .filter((f): f is UploadedFile => Boolean(f));
@@ -300,6 +305,13 @@ export function ChatWorkbench({
                           <RotateCcw className="w-2.5 h-2.5" />
                           <span>重跑</span>
                         </button>}
+                        {canResume && <button
+                          type="button"
+                          disabled={isRunning || demoMode}
+                          onClick={() => onResumeMessage(msg.id)}
+                          title={demoMode ? "关闭离线运行后可继续解析" : "使用当前智能体继续解析此结果的未完成批次"}
+                          className="text-action disabled:opacity-40"
+                        >继续解析未完成批次</button>}
                       </div>
                     </div>
                   )}

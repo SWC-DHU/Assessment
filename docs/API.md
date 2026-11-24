@@ -23,17 +23,22 @@
 | 方法 | 路径 | 调整 |
 | --- | --- | --- |
 | POST | `/api/sessions/{id}/run` | `strategy` 默认为 `semantic`，可选 `legacy`。可提供 `run_token` 进行服务端取消。用 `base_version_id` 指定历史修订基础 |
-| POST | `/api/sessions/{id}/runs/{run_token}/cancel` | 请求停止在途运行。传入启动或重跑时使用的 UUID |
+| POST | `/api/sessions/{id}/runs/{run_token}/cancel` | 请求停止在途运行。传入启动、重跑或续跑时使用的 UUID |
 | POST | `/api/sessions/{id}/rerun/{message_id}` | 保存新运行。语义重跑读取原基础版本、来源及指令 |
+| POST | `/api/sessions/{id}/resume/{message_id}` | 使用当前会话的在线模型，仅处理指定语义结果中未完成的原始批次。复用已核验事实，保存带父版本链接的新结果。可传 `run_token` |
 | POST | `/api/sessions/{id}/files/{file_id}/reparse` | 重新解析存储中的文件 |
 | PATCH | `/api/sessions/{id}` | 旧版 JSON 可编辑。直接改写规范语义返回 409 |
 | POST | `/api/agents/test-connection` | 返回 `error_code`、HTTP 状态、有效模型及诊断 |
-| POST / PATCH | `/api/agents[/{agent_id}]` | 可保存 `execution.timeout_seconds`、`request_budget` 和 `llm_disambiguation` |
+| POST / PATCH | `/api/agents[/{agent_id}]` | 可保存 `execution.timeout_seconds`、`request_budget`、`batch_max_tokens` 和 `llm_disambiguation` |
 | GET | `/api/templates/{template_id}/versions` | 查询自定义模板定义快照 |
 | POST | `/api/templates/{template_id}/preview` | 继续支持 Jinja2 和列映射，表格增加 `cell_states`、`row_ids` 和 `mapping_issues` |
 | POST | `/api/templates/{template_id}/export` | 生成 XLSX、DOCX、Markdown 或 JSON。规范 JSON 建议使用版本下载接口 |
 
 版本和文件请求均按会话限定。Provider 错误会保存在执行记录中，其中 401、模型授权拒绝、其他 403、服务不可用和输出达到长度限制分别诊断。
+
+语义抽取每批发送的 `max_tokens` 取智能体 `max_tokens` 与 `execution.batch_max_tokens` 的较小值。未填写单批上限时，DeepSeek 官方接口默认 8192，其他接口默认 4096。官方 DeepSeek 的语义事实抽取关闭思考，单轮请求预算默认 4。运行诊断包含各批次的实际上限、结束原因及 API 返回的用量。
+
+续跑使用原始消息和附件中的片段，不会新增用户消息。原始片段无法定位时返回 409。若续跑基于历史结果，新版本依然保存到历史，当前版本指针保留在更新的结果上。
 
 ## v2 领域接口
 

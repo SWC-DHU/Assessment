@@ -138,6 +138,7 @@ def test_provider_contract_budget_repair_and_redacted_403(api, monkeypatch):
     assert debug["request_count"] == 2 and debug["usage"]["total_tokens"] == 40
     assert debug["model_used"] == "provider-reported"
     assert all(call["model"] == "selected-model" for call in request_log)
+    assert all("thinking" not in call for call in request_log)
     assert any(stage["stage"] == "llm_repair" for stage in debug["pipeline_stages"])
 
     for mode, code in (("model", "model_access_denied"), ("policy", "provider_forbidden")):
@@ -146,6 +147,115 @@ def test_provider_contract_budget_repair_and_redacted_403(api, monkeypatch):
         assert failed["assistant_message"]["debug_info"]["error_code"] == code
         assert secret not in json.dumps(failed, ensure_ascii=False)
         assert secret not in api.get(url).text
+
+
+def test_official_deepseek_uses_effective_batch_limit_and_split_budget(api, monkeypatch):
+    requests = []
+
+    def handler(request):
+        call = json.loads(request.content)
+        requests.append(call)
+        cut = len(requests) == 1
+        return httpx.Response(200, json={
+            "id": "fixture", "object": "chat.completion", "model": "deepseek-flash", "created": 1,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": None if cut else "{}"},
+                         "finish_reason": "length" if cut else "stop"}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": call["max_tokens"] if cut else 2,
+                      "completion_tokens_details": {"reasoning_tokens": 0},
+                      "total_tokens": 10 + (call["max_tokens"] if cut else 2)},
+        })
+
+    monkeypatch.setattr(llm_extractor, "AsyncOpenAI", lambda **kwargs: AsyncOpenAI(
+        **kwargs, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    ))
+    agent = api.post("/api/agents", json={
+        "name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "api_key": "fixture-key",
+        "model": "deepseek-flash", "max_tokens": 16383,
+    }).json()
+    session_id = api.post("/api/sessions", json={"agent_id": agent["id"]}).json()["id"]
+    session = f"/api/sessions/{session_id}"
+    text = "整线生产节拍≤60秒/件。工序01清洗。工序02检测。"
+    response = api.post(f"{session}/run", json={"message": text})
+    assert response.status_code == 200
+    debug = response.json()["assistant_message"]["debug_info"]
+    assert (debug["max_tokens"], debug["batch_max_tokens"], debug["request_count"], debug["request_budget"]) == (16383, 8192, 3, 4)
+    assert [call["max_tokens"] for call in requests] == [8192, 8192, 8192]
+    assert all(call["thinking"] == {"type": "disabled"} and call["response_format"] == {"type": "json_object"}
+               for call in requests)
+    assert [(entry["batch_id"], entry["finish_reason"]) for entry in debug["provider_attempts"]] == [
+        ("batch-1", "length"), ("batch-1.a", "stop"), ("batch-1.b", "stop"),
+    ]
+    first = debug["provider_attempts"][0]
+    assert (first["max_tokens"], first["usage"]["completion_tokens"], first["usage"]["reasoning_tokens"]) == (8192, 8192, 0)
+    assert all(batch["status"] == "complete" for batch in debug["batches"])
+
+    agent_url = f"/api/agents/{agent['id']}"
+    assert api.patch(agent_url, json={"execution": {"batch_max_tokens": 6144}}).status_code == 200
+    changed = api.patch(agent_url, json={"execution": {"request_budget": 3}}).json()
+    assert changed["execution"]["batch_max_tokens"] == 6144
+    rerun = api.post(f"{session}/rerun/{response.json()['assistant_message']['id']}").json()
+    assert rerun["assistant_message"]["debug_info"]["batch_max_tokens"] == requests[-1]["max_tokens"] == 6144
+    assert api.patch(agent_url, json={"max_tokens": 4096, "execution": {"batch_max_tokens": None}}).status_code == 200
+    rerun = api.post(f"{session}/rerun/{response.json()['assistant_message']['id']}").json()
+    assert rerun["assistant_message"]["debug_info"]["batch_max_tokens"] == requests[-1]["max_tokens"] == 4096
+
+
+def test_resume_only_pending_source_ranges_and_keep_history(api, monkeypatch):
+    sent = []
+
+    def handler(request):
+        messages = json.loads(request.content)["messages"]
+        content = messages[-1]["content"]
+        sent.append(content)
+        cut = len(sent) == 1
+        operation = {"id": "proposed", "number": "01", "name": "清洗", "evidence": [{"quote": "工序01清洗"}]}
+        if "工序02检测" in content:
+            operation = {"id": "proposed", "number": "02", "name": "检测", "evidence": [{"quote": "工序02检测"}]}
+        return httpx.Response(200, json={
+            "id": "fixture", "object": "chat.completion", "model": "deepseek-flash", "created": 1,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": None if cut else json.dumps(
+                {"operations": [operation]}, ensure_ascii=False)}, "finish_reason": "length" if cut else "stop"}],
+        })
+
+    monkeypatch.setattr(llm_extractor, "AsyncOpenAI", lambda **kwargs: AsyncOpenAI(
+        **kwargs, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    ))
+    agent = api.post("/api/agents", json={
+        "name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "api_key": "fixture-key",
+        "model": "deepseek-flash", "execution": {"request_budget": 2},
+    }).json()
+    session_id = api.post("/api/sessions", json={"agent_id": agent["id"]}).json()["id"]
+    session = f"/api/sessions/{session_id}"
+    assert api.post(f"{session}/run", json={"message": "整线生产节拍≤60秒/件。工序01清洗。工序02检测。"}).status_code == 200
+    detail = api.get(session).json()
+    original_user, partial = detail["messages"]
+    original = detail["current_extracted_json"]["semantic"]
+    assert partial["status"] == "partial" and len(sent) == 2
+    assert [(batch["status"], batch["reason"]) for batch in original["metadata"]["batches"]] == [
+        ("complete", None), ("unprocessed", "request_budget_exhausted"),
+    ]
+
+    url = f"{session}/resume/{partial['id']}"
+    response = api.post(url)
+    assert response.status_code == 200, response.text
+    resumed = response.json()
+    child = resumed["current_extracted_json"]["semantic"]
+    assert len(sent) == 3 and "工序02检测" in sent[-1] and "工序01清洗" not in sent[-1]
+    assert resumed["user_message"]["id"] == original_user["id"]
+    assert [msg["role"] for msg in api.get(session).json()["messages"]] == ["user", "assistant", "assistant"]
+    assert child["parent_version_id"] == original["run_id"]
+    assert child["metadata"]["extraction_status"] == "complete"
+    assert child["input_digest"] == original["input_digest"]
+    assert child["constraints"] == original["constraints"]
+    assert child["operations"][0]["evidence"] == original["operations"][0]["evidence"]
+    assert all(item["evidence"][0]["document_id"] == original_user["id"] for item in child["operations"])
+    assert len(child["metadata"]["batches"]) == 2
+    assert api.post(f"{session}/resume/{child['run_id']}").status_code == 409
+
+    historical = api.post(url).json()
+    assert historical["current_extracted_json"]["semantic"]["run_id"] == child["run_id"]
+    assert historical["assistant_message"]["extracted_json"]["semantic"]["parent_version_id"] == original["run_id"]
+    assert historical["assistant_message"]["debug_info"]["activation_note"]
 
 
 def test_cancel_before_run_does_not_leave_messages(api):

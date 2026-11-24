@@ -249,4 +249,9 @@ export const api = {
       `/api/sessions/${sessionId}/rerun/${messageId}?use_demo_fallback=${useDemoFallback}${runToken ? `&run_token=${runToken}` : ""}`,
       { method: "POST", signal }
     ),
+  resumeTurn: (sessionId: string, messageId: string, signal: AbortSignal, runToken: string) =>
+    request<RunChatResponse>(
+      `/api/sessions/${sessionId}/resume/${messageId}?run_token=${runToken}`,
+      { method: "POST", signal },
+    ),
 };

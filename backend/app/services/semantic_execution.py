@@ -13,15 +13,24 @@ from domain_semantics.pipeline import Builder, CANDIDATES, candidate_errors, ent
 from domain_semantics.schema import BatchReport, SemanticModel
 from domain_semantics.sources import Document, digest
 
-from .extraction_batches import ExtractionBatch, fragment_digest, plan_batches, recovered_rows, scoped_candidates
-from .llm_extractor import ExtractionResult, ExtractorConfig, FileInputContext, run_extraction
+from .extraction_batches import (
+    ExtractionBatch, ResumeSourceError, fragment_digest, plan_batches, recovered_rows, resume_batches, scoped_candidates,
+)
+from .llm_extractor import ExtractionResult, ExtractorConfig, FileInputContext, is_official_deepseek, run_extraction
 from .redaction import safe_endpoint
 from .semantic_tools import ToolTrace
 
 PROMPTS = Path(__file__).resolve().parents[2] / "domain_semantics" / "prompts"
 PROMPT_VERSION = "2.1.0"
-MAX_BATCH_OUTPUT = 4096
+DEFAULT_BATCH_OUTPUT = 4096
+DEEPSEEK_BATCH_OUTPUT = 8192
+DEEPSEEK_REQUEST_BUDGET = 4
 MAX_BATCH_ROWS = 24
+
+
+def batch_output_limit(config: ExtractorConfig) -> int:
+    default = DEEPSEEK_BATCH_OUTPUT if is_official_deepseek(config.base_url) else DEFAULT_BATCH_OUTPUT
+    return min(config.max_tokens, config.semantic_batch_max_tokens or default)
 
 
 @lru_cache
@@ -142,7 +151,7 @@ async def extract_facts(config, batch, builder, trail, budget, repair=None):
     if repair is not None:
         instruction += "\n" + prompt("repair")
     configured = replace(config, domain_instruction=instruction, extraction_schema={}, require_source_quote=False,
-                         request_budget=min(budget, 2), max_tokens=min(config.max_tokens, MAX_BATCH_OUTPUT))
+                         request_budget=min(budget, 2), max_tokens=batch_output_limit(config), disable_thinking=True)
     reference = related_reference(batch, builder) or {}
     if repair is not None:
         reference.update(repair)
@@ -150,6 +159,7 @@ async def extract_facts(config, batch, builder, trail, budget, repair=None):
     entry = trail.start(step_name, f"{batch.scope} · {batch.size} 字符 · {len(batch.fragments)} 个片段", batch.id)
     result = await run_extraction(configured, "仅提取本批来源支持的事实。", batch.context(), current_state=reference or None)
     debug = result.debug_info
+    debug.update(batch_id=batch.id, stage=step_name, max_tokens=configured.max_tokens)
     trail.end(entry, result.status, result.error_message or f"{debug.get('request_count', 0)} 次请求 · {debug.get('finish_reason') or '响应结束'}",
               debug.get("error_code"))
     return result
@@ -157,24 +167,30 @@ async def extract_facts(config, batch, builder, trail, budget, repair=None):
 
 async def execute(config: ExtractorConfig, message: Document, files: list[Document], run_id: str,
                   base: SemanticModel | None, offline: bool = False, failed: list[str] | None = None,
-                  session_id: str | None = None, publish=None) -> tuple[SemanticModel | None, ExtractionResult]:
+                  session_id: str | None = None, publish=None,
+                  resume: list[BatchReport] | None = None) -> tuple[SemanticModel | None, ExtractionResult]:
     text = message.fragments[0].text
     docs = [*files, *([message] if text.strip() else [])]
+    old_refs = {item.document_id: item.content_sha256 for item in base.source_refs} if base else {}
+    if resume is not None:
+        docs = [doc for doc in docs if doc.ref.document_id in old_refs]
+        if any(old_refs[doc.ref.document_id] != doc.ref.content_sha256 for doc in docs):
+            raise ResumeSourceError("原始资料已变化，请使用重跑重新解析。")
+        batches = resume_batches(docs, resume)
     trail = ToolTrace(publish)
     catalog = trail.call("query_ontology", "读取 RDF 版本及关系端点", query_ontology)
     builder = Builder(docs, run_id, base)
     builder.model.metadata.session_id = session_id
-    old_refs = {item.document_id: item.content_sha256 for item in base.source_refs} if base else {}
     prior = base.metadata.batches if base and base.metadata else []
     previously_processed = set(base.metadata.processed_source_ids) if base and base.metadata else set()
     unchanged = {doc.ref.document_id for doc in docs if old_refs.get(doc.ref.document_id) == doc.ref.content_sha256}
     completed_fragments = {fragment for report in prior if report.status == "complete" and set(report.source_ids) <= unchanged
                            for fragment in report.fragments}
-    revised = bool(base and revision_request(text))
-    needs_review = bool(base and reformat_revision(text) and not revised)
+    revised = bool(resume is None and base and revision_request(text))
+    needs_review = bool(resume is None and base and reformat_revision(text) and not revised)
     covered = set()
     covered_text = set()
-    source_docs = [doc for doc in docs if doc.ref.document_id not in unchanged & previously_processed]
+    source_docs = [doc for doc in docs if doc.ref.document_id not in unchanged & previously_processed] if resume is None else []
     pending_files = [doc for doc in source_docs if doc.ref.kind == "file"]
     rows = trail.call("parse_document", f"定位 {len(pending_files)} 份待处理文件，复用 {len(files) - len(pending_files)} 份",
                       lambda: [] if revised else list(table_rows(pending_files, covered)))
@@ -196,7 +212,8 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
     trail.end(initial, "success" if builder.by_id else "skipped",
               f"{len(rows)} 行表格 · {len(builder.by_id)} 项已建立或继承事实")
 
-    batches = [] if revised else plan_batches(source_docs, covered - builder.residual_cells, covered_text, completed_fragments)
+    if resume is None:
+        batches = [] if revised else plan_batches(source_docs, covered - builder.residual_cells, covered_text, completed_fragments)
     attempts, reports, payloads = [], [], []
     budget = config.request_budget
     request_queue = deque(batches)
@@ -210,7 +227,7 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
         if skip_reason or budget <= 0:
             reports.append(unprocessed(batch, skip_reason or "request_budget_exhausted"))
             continue
-        result = await extract_facts(config, batch, builder, trail, budget)
+        result = await extract_facts(config, batch, builder, trail, max(1, budget - len(request_queue)))
         attempts.append(result.debug_info)
         budget -= result.debug_info.get("request_count", 0)
         code = result.debug_info.get("error_code")
@@ -230,15 +247,14 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
                 payloads.append((batch, payload))
             children = batch.split() if batch.attempt == 0 else []
             if children and budget > 0:
-                # Replacements are considered alongside untouched batches. Always preserve recovered records.
-                request_queue.extend(children)
+                request_queue.extendleft(reversed(children))
                 trail.end(trail.start("batch_split", batch.scope, batch.id), "partial",
                           f"达到批次输出上限，拆成 {len(children)} 个子批次并保留 {count_rows(locally_valid(payload))} 条候选", overflow)
                 continue
             reports.append(unprocessed(batch, overflow, "partial" if locally_valid(payload) else "failed", count_rows(locally_valid(payload))))
             continue
-        if errors and budget > 0 and batch.attempt == 0 and (result.extracted_json is not None or code == "invalid_json"):
-            repaired = await extract_facts(config, batch, builder, trail, budget, repair={
+        if errors and budget > len(request_queue) and batch.attempt == 0 and (result.extracted_json is not None or code == "invalid_json"):
+            repaired = await extract_facts(config, batch, builder, trail, budget - len(request_queue), repair={
                 "fields_to_repair": errors[:8],
                 "previous_output_excerpt": result.debug_info.get("raw_response", "")[:850],
             })
@@ -267,11 +283,12 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
     if batches and not builder.by_id:
         builder.issue("empty_extraction", "本次未生成可核验事实", "extraction")
     mapping = trail.call("normalize_term", "使用受控工序、能力及参数词表", builder.mapping_queue) if not revised else []
-    if mapping and config.llm_disambiguation and not skip_reason and budget > 0:
+    if mapping and resume is None and config.llm_disambiguation and not skip_reason and budget > 0:
         entry = trail.start("llm_disambiguation", "词表歧义候选")
         configured = replace(config, domain_instruction=prompt("mapping"), extraction_schema={},
-                             request_budget=budget, max_tokens=min(config.max_tokens, MAX_BATCH_OUTPUT))
+                             request_budget=budget, max_tokens=batch_output_limit(config))
         judged = await run_extraction(configured, json.dumps(mapping[:10], ensure_ascii=False), [])
+        judged.debug_info.update(stage="llm_disambiguation", max_tokens=configured.max_tokens)
         attempts.append(judged.debug_info)
         choices = (judged.extracted_json or {}).get("choices", {})
         if isinstance(choices, dict):
@@ -285,17 +302,23 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
         if report.status == "complete" and any(path.rsplit(".", 2)[0] == report.id for path in rejected):
             report.status, report.reason = "partial", "semantic_evidence_pending"
     retried = {doc.ref.document_id for doc in source_docs} if not revised else set()
-    retained = [item.model_copy(update={"id": item.id if ":" in item.id else f"{base.run_id[:8]}:{item.id}"})
-                for item in prior if item.status != "complete" and not set(item.source_ids) <= retried]
     pending_ids = {source_id for report in reports if report.status != "complete" for source_id in report.source_ids}
+    if resume is None:
+        inherited = [item for item in prior if item.status != "complete" and not set(item.source_ids) <= retried]
+        inherited.extend(item for item in prior if item.status == "complete" and set(item.source_ids) & pending_ids
+                         and set(item.source_ids) <= unchanged)
+    else:
+        replaced = {item.id for item in resume}
+        inherited = [item for item in prior if item.id not in replaced]
+        retried = {source_id for item in resume for source_id in item.source_ids}
+        pending_ids.update(source_id for item in inherited if item.status != "complete" for source_id in item.source_ids)
+    retained = [item.model_copy(update={"id": item.id if ":" in item.id else f"{base.run_id[:8]}:{item.id}"})
+                for item in inherited]
     builder.model.metadata.processed_source_ids = sorted(
         (previously_processed - {doc.ref.document_id for doc in docs if doc.ref.document_id not in unchanged})
         | (retried - pending_ids)
     )
-    reused = [item.model_copy(update={"id": item.id if ":" in item.id else f"{base.run_id[:8]}:{item.id}"})
-              for item in prior if item.status == "complete" and set(item.source_ids) & pending_ids
-              and set(item.source_ids) <= unchanged]
-    builder.model.metadata.batches = [*retained, *reused, *reports]
+    builder.model.metadata.batches = [*retained, *reports]
     for report in [*retained, *reports]:
         if report.status != "complete":
             builder.issue("batch_" + report.status, f"{report.scope} · {report.reason}", report.id, "unprocessed")
@@ -316,7 +339,7 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
     debug.update(
         provider_attempts=attempts, request_count=sum(entry.get("request_count", 0) for entry in attempts),
         request_budget=config.request_budget, timeout_seconds=config.timeout_seconds,
-        max_tokens=config.max_tokens, batch_max_tokens=min(config.max_tokens, MAX_BATCH_OUTPUT),
+        max_tokens=config.max_tokens, batch_max_tokens=batch_output_limit(config),
         temperature=config.temperature, json_mode=config.json_mode,
         duration_ms=round(sum(stage.get("duration_ms", 0) for stage in trail.steps), 2),
         usage={key: sum(entry[key] for entry in usages if isinstance(entry.get(key), int))

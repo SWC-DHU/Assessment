@@ -5,6 +5,7 @@ import json
 import re
 
 from domain_semantics.candidates import ExtractionCandidates
+from domain_semantics.schema import BatchReport
 from domain_semantics.sources import Document, Fragment, digest
 from domain_semantics.structured_text import clauses
 
@@ -95,6 +96,37 @@ def plan_batches(documents: list[Document], covered: set[tuple[str, str]],
         if current:
             result.append(ExtractionBatch(f"batch-{len(result) + 1}", scope, tuple(current)))
     return result
+
+
+class ResumeSourceError(ValueError):
+    pass
+
+
+def resume_batches(documents: list[Document], pending: list[BatchReport]) -> list[ExtractionBatch]:
+    source_ids = {source_id for report in pending for source_id in report.source_ids}
+    fragments = {}
+    for document in documents:
+        if document.ref.document_id not in source_ids:
+            continue
+        for original in document.fragments:
+            parts = split_text(original)
+            while parts:
+                part = parts.pop()
+                key = fragment_digest(part)
+                if key in fragments:
+                    continue
+                fragments[key] = part
+                # Splitting a single fragment creates new ranges while retaining its original coordinates.
+                single = ExtractionBatch("source", "", (part,))
+                parts.extend(child.fragments[0] for child in single.split())
+
+    batches = []
+    for report in pending:
+        if not report.fragments or any(key not in fragments for key in report.fragments):
+            raise ResumeSourceError("无法定位未完成批次的原始片段，请使用重跑或恢复原始资料。")
+        parts = tuple(fragments[key] for key in report.fragments)
+        batches.append(ExtractionBatch(f"batch-{len(batches) + 1}", report.scope, parts))
+    return batches
 
 
 def recovered_rows(raw: str) -> dict:
