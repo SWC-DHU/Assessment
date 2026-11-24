@@ -10,12 +10,16 @@ from dataclasses import dataclass, field
 import json
 import re
 import time
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
 from .redaction import redact, safe_endpoint
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, AuthenticationError
+
+SemanticThinking = Literal["service_default", "disabled"]
+ThinkingParameter = Literal["thinking", "reasoning_effort"]
+ThinkingResult = Literal["reasoning_returned", "zero_reported", "unverified", "rejected"]
 
 
 def normalize_base_url(raw_url: str) -> str:
@@ -67,6 +71,8 @@ class ExtractorConfig:
     domain_instruction: str = ""
     plain_instruction: str = ""
     semantic_batch_max_tokens: int | None = None
+    semantic_thinking: SemanticThinking | None = None
+    thinking_parameter: ThinkingParameter = "thinking"
     disable_thinking: bool = False
 
 
@@ -556,9 +562,10 @@ async def _run_extraction(config, user_message, files, current_state, conversati
     }
     if config.json_mode:
         kwargs["response_format"] = {"type": "json_object"}
-    if config.disable_thinking and is_official_deepseek(effective_base_url):
-        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
-        debug_info["thinking"] = "disabled"
+    if config.disable_thinking:
+        kwargs["extra_body"] = ({"reasoning_effort": "none"} if config.thinking_parameter == "reasoning_effort"
+                                else {"thinking": {"type": "disabled"}})
+        debug_info.update(thinking="disabled", thinking_parameter=config.thinking_parameter)
     debug_info["max_tokens"] = config.max_tokens
 
     raw_response = ""
@@ -570,7 +577,9 @@ async def _run_extraction(config, user_message, files, current_state, conversati
             resp = await client.chat.completions.create(**kwargs)
         except APIStatusError as exc:
             # Graceful fallback if provider does not support response_format=json_object
-            if config.json_mode and config.request_budget > 1 and _is_response_format_error(exc):
+            if config.json_mode and config.request_budget > 1 and _is_response_format_error(exc) and not (
+                config.disable_thinking and _is_thinking_parameter_error(exc, config.thinking_parameter)
+            ):
                 kwargs.pop("response_format", None)
                 debug_info["json_mode_fallback"] = True
                 debug_info["request_count"] += 1
@@ -592,6 +601,11 @@ async def _run_extraction(config, user_message, files, current_state, conversati
             reasoning_tokens = getattr(details, "reasoning_tokens", None)
             if isinstance(reasoning_tokens, int):
                 usage_dict["reasoning_tokens"] = reasoning_tokens
+        if config.disable_thinking:
+            reasoning = usage_dict.get("reasoning_tokens")
+            reasoning_content = getattr(choice.message, "reasoning_content", None) if choice else None
+            debug_info["thinking_result"] = ("reasoning_returned" if reasoning_content or (reasoning or 0) > 0
+                                             else "zero_reported" if reasoning == 0 else "unverified")
     except AuthenticationError as exc:
         debug_info.update(error_code="authentication_failed", status_code=401)
         err = f"大模型鉴权失败 (HTTP 401)：请检查 API Key 是否正确。详情：{exc}"
@@ -627,6 +641,10 @@ async def _run_extraction(config, user_message, files, current_state, conversati
         return ExtractionResult(status="error", error_message=err, debug_info=debug_info)
     except APIStatusError as exc:
         code, err = provider_status(exc, effective_model)
+        if config.disable_thinking and _is_thinking_parameter_error(exc, config.thinking_parameter):
+            code = "thinking_parameter_rejected"
+            err = f"服务拒绝了关闭思考参数 {config.thinking_parameter}（HTTP {exc.status_code}）。请用 JSON 探测核对网关支持的参数。"
+            debug_info["thinking_result"] = "rejected"
         debug_info.update(error_code=code, status_code=exc.status_code)
         debug_info.update(
             {
@@ -661,8 +679,14 @@ async def _run_extraction(config, user_message, files, current_state, conversati
         debug_info["validation_errors"] = [json_err or "JSON 解析失败"]
         debug_info["error_code"] = "invalid_json"
         if debug_info.get("finish_reason") == "length":
+            reason = "output_truncated"
             err = f"模型输出达到本次请求的长度限制（max_tokens={config.max_tokens}），未形成完整 JSON。"
-            debug_info.update(error_message=err, error_code="output_truncated")
+            if not raw_response.strip() and (usage_dict.get("reasoning_tokens") or 0) > 0 and (
+                usage_dict["reasoning_tokens"] == usage_dict.get("completion_tokens")
+            ):
+                reason = "reasoning_budget_exhausted"
+                err = f"推理耗尽本批输出额度（max_tokens={config.max_tokens}），未生成 JSON。"
+            debug_info.update(error_message=err, error_code=reason)
         return ExtractionResult(status="error", error_message=err, debug_info=debug_info)
 
     val_errors = validate_extracted_data(
@@ -732,6 +756,12 @@ def provider_status(exc: APIStatusError, model: str) -> tuple[str, str]:
     if status >= 500 or status == 429:
         return "service_unavailable", f"模型服务暂不可用 (HTTP {status})。请检查服务状态或配额。{exc.message}"
     return "provider_error", f"接口返回异常 (HTTP {status})。{exc.message}"
+
+
+def _is_thinking_parameter_error(exc: APIStatusError, parameter: ThinkingParameter) -> bool:
+    if exc.status_code not in (400, 422):
+        return False
+    return parameter in f"{exc.message} {getattr(exc, 'body', '')}".casefold()
 
 
 async def list_available_models(

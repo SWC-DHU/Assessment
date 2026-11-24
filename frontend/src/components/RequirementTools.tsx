@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Form, Input, InputNumber, Modal, Select, Tabs } from "antd";
 import { api } from "../api/client";
 import type { OntologyCatalog, OntologyTerm, PipelineStage, ReviewRequest, SemanticModel } from "../types";
-import { entitiesInGroup, groups } from "./semanticPresentation";
+import { entitiesInGroup, groups, modelingScopeLabels } from "./semanticPresentation";
 import { statusLabels } from "./SemanticDetails";
 
 export const toolNames: Record<string, string> = {
@@ -100,7 +100,7 @@ const flowTypes = [
 
 const actionNames = [
   ["rename_operation", "修正工序名称"], ["set_component_quantity", "修订组件数量"], ["confirm_capability", "确认能力映射"],
-  ["add_transition", "补充工艺关系"], ["confirm_fact", "确认事实"],
+  ["add_transition", "补充工艺关系"], ["confirm_fact", "确认事实"], ["set_modeling_task", "确认建模任务"],
 ];
 
 export function ReviewDialog({ model, onSubmit, onClose }: {
@@ -142,7 +142,7 @@ export function ReviewDialog({ model, onSubmit, onClose }: {
         finally { setSaving(false); }
       }}>
       <Form.Item name="action" label="审核动作" rules={[{ required: true }]}>
-        <Select options={actionNames.map(([value, label]) => ({ value, label }))} />
+        <Select virtual={false} options={actionNames.map(([value, label]) => ({ value, label }))} />
       </Form.Item>
       {action === "rename_operation" && <>
         <Form.Item name="operation_id" label="工序" preserve={false} rules={[{ required: true }]}><Select options={opOptions} /></Form.Item>
@@ -179,6 +179,16 @@ export function ReviewDialog({ model, onSubmit, onClose }: {
       {action === "confirm_fact" && <Form.Item name="fact_id" label="确认对象" preserve={false} rules={[{ required: true }]}>
         <Select showSearch optionFilterProp="label" options={[...options, ...relationOptions(model.relations)]} />
       </Form.Item>}
+      {action === "set_modeling_task" && <>
+        <p className="muted">确认本轮任务为构建数字孪生模型，并选择已有依据的范围和目标产品。</p>
+        <Form.Item name="target_scope" label="建模范围" preserve={false} initialValue={model.modeling_task?.target_scope ?? undefined}>
+          <Select virtual={false} allowClear placeholder="待确认" options={Object.entries(modelingScopeLabels).map(([value, label]) => ({ value, label }))} />
+        </Form.Item>
+        <Form.Item name="target_product_id" label="目标产品" preserve={false} initialValue={model.modeling_task?.target_product_id ?? undefined}>
+          <Select virtual={false} allowClear placeholder="待确认" options={model.products.filter((item) => item.status === "verified")
+            .map((item) => ({ value: item.id, label: item.name }))} />
+        </Form.Item>
+      </>}
       <Form.Item name="note" label="审核依据" rules={[{ required: true, whitespace: true }]}>
         <Input.TextArea rows={2} placeholder="写明来源、现场确认或修改原因" maxLength={1200} />
       </Form.Item>

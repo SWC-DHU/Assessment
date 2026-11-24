@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, App as AntdApp } from "antd";
+import { Alert, App as AntdApp, Modal } from "antd";
 import { Files, Layers3, MessageSquare } from "lucide-react";
 import { api } from "./api/client";
 import { AgentManagerModal } from "./components/AgentManagerModal";
@@ -14,6 +14,7 @@ import type {
   AgentProfile,
   AgentProfilePayload,
   EnvStatus,
+  Evidence,
   OutputTemplate,
   OutputTemplatePayload,
   SampleDataset,
@@ -24,6 +25,18 @@ import type {
   TestSessionSummary,
   UploadedFile,
 } from "./types";
+
+function SourceMessage({ text, cite }: { text: string; cite?: Evidence }) {
+  const start = cite?.location.start;
+  const end = cite?.location.end;
+  const characters = Array.from(text);
+  const quote = start == null || end == null ? null : characters.slice(start, end).join("");
+  return <pre className="message-source-text">{
+    cite && start != null && end != null && quote === cite.quote
+      ? <>{characters.slice(0, start).join("")}<mark>{quote}</mark>{characters.slice(end).join("")}</>
+      : text
+  }</pre>;
+}
 
 export default function App() {
   const { message: antdMessage } = AntdApp.useApp();
@@ -56,6 +69,8 @@ export default function App() {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [previewFile, setPreviewFile] = useState<UploadedFile | null>(null);
+  const [sourceEvidence, setSourceEvidence] = useState<Evidence>();
+  const [messageSource, setMessageSource] = useState<{ text: string; cite?: Evidence }>();
   const [agentModalOpen, setAgentModalOpen] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [bannerError, setBannerError] = useState<string | null>(null);
@@ -603,7 +618,7 @@ export default function App() {
             <input aria-label="调整结果面板宽度" type="range" min={36} max={53} value={resultWidth}
               onChange={(event) => setResultWidth(Number(event.target.value))} />
           </label>
-          <RightPanel templates={templates} activeTemplateId={activeTemplateId} onSelectTemplate={handleSelectTemplate}
+          <RightPanel sessionId={activeSession?.id ?? null} templates={templates} activeTemplateId={activeTemplateId} onSelectTemplate={handleSelectTemplate}
             extractedJson={visibleData} templatePreview={templatePreview} onApplyJsonEdit={handleApplyJsonEdit}
             onExport={handleExport} debugMessage={debugMessage} progress={progress} isRunning={isRunning} tab={tab} onTab={setTab} versions={versions}
             onVersion={(id) => void handleInspect(id)} onRevise={(id) => {
@@ -611,16 +626,21 @@ export default function App() {
               requestAnimationFrame(() => document.getElementById("workbench-input")?.focus());
             }} onVerify={(id) => activeSession ? api.verifyVersion(activeSession.id, id) : Promise.reject("没有会话")
             } onProject={handleProject} onReview={handleReview}
-            onGraph={(id) => activeSession ? api.getProcessGraph(activeSession.id, id) : Promise.reject(new Error("没有会话"))}
-            onOpenSource={(id) => {
+            onOpenSource={(id, cite) => {
               const file = activeSession?.files.find((item) => item.id === id);
-              if (file) setPreviewFile(file);
-              else antdMessage.info("来源文件已从当前会话移除");
+              const message = activeSession?.messages.find((item) => item.id === id);
+              if (file) { setSourceEvidence(cite); setPreviewFile(file); }
+              else if (message) setMessageSource({ text: message.content, cite });
+              else antdMessage.info("来源已从当前会话移除");
             }} />
         </aside>
       </main>
 
-      <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+      <FilePreviewModal key={previewFile?.id} file={previewFile} cite={sourceEvidence}
+        onClose={() => { setPreviewFile(null); setSourceEvidence(undefined); }} />
+      <Modal open={Boolean(messageSource)} title="用户消息原文" footer={null} onCancel={() => setMessageSource(undefined)}>
+        {messageSource && <SourceMessage {...messageSource} />}
+      </Modal>
 
       <AgentManagerModal
         open={agentModalOpen}

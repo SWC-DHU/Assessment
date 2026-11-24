@@ -54,3 +54,4 @@ export function relationTitle(edge: SemanticRelation, entities: ReadonlyMap<stri
   };
   return `${name(edge.source_id)} → ${relationLabel(edge)} → ${name(edge.target_id)}`;
 }
+export const modelingScopeLabels = { production_line: "产线", workstation: "工位", operation: "工序", product: "产品" };

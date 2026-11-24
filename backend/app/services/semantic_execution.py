@@ -21,16 +21,51 @@ from .redaction import safe_endpoint
 from .semantic_tools import ToolTrace
 
 PROMPTS = Path(__file__).resolve().parents[2] / "domain_semantics" / "prompts"
-PROMPT_VERSION = "2.1.0"
+PROMPT_VERSION = "2.2.1"
 DEFAULT_BATCH_OUTPUT = 4096
 DEEPSEEK_BATCH_OUTPUT = 8192
 DEEPSEEK_REQUEST_BUDGET = 4
 MAX_BATCH_ROWS = 24
+TRUNCATION_CODES = {"output_truncated", "reasoning_budget_exhausted"}
 
 
 def batch_output_limit(config: ExtractorConfig) -> int:
     default = DEEPSEEK_BATCH_OUTPUT if is_official_deepseek(config.base_url) else DEFAULT_BATCH_OUTPUT
     return min(config.max_tokens, config.semantic_batch_max_tokens or default)
+
+
+def disable_semantic_thinking(config: ExtractorConfig) -> bool:
+    if config.semantic_thinking is None:
+        return is_official_deepseek(config.base_url)
+    return config.semantic_thinking == "disabled"
+
+
+async def probe_json(config: ExtractorConfig) -> dict:
+    max_tokens = min(batch_output_limit(config), 512)
+    if config.base_url.startswith("mock://"):
+        return {"ok": False, "max_tokens": max_tokens, "message": "离线 Mock 无需探测。请选择在线接口。"}
+    sample = {"value": 120, "unit": "s"}
+    configured = replace(config, max_tokens=max_tokens, json_mode=True, request_budget=1, require_source_quote=False,
+                         disable_thinking=disable_semantic_thinking(config),
+                         plain_instruction='只输出 JSON 对象。提取给定的节拍值和单位，使用 value 和 unit 两个字段。')
+    result = await run_extraction(configured, '节拍为120秒，单位用 s。', [])
+    debug = result.debug_info
+    try:
+        parsed = json.loads(debug.get("raw_response") or "")
+    except ValueError:
+        parsed = None
+    ok = debug.get("finish_reason") == "stop" and parsed == sample
+    thinking_result = debug.get("thinking_result")
+    message = result.error_message or "未收到符合样例的完整 JSON。"
+    if ok:
+        message = {
+            "reasoning_returned": "JSON 探测通过。发送关闭思考参数后，服务仍报告了推理。",
+            "zero_reported": "JSON 探测通过。服务报告推理用量为 0。",
+            "unverified": "JSON 探测通过。服务未报告推理用量，无法验证思考开关。",
+        }.get(thinking_result, "JSON 探测通过。")
+    return {"ok": ok, "message": message, "max_tokens": max_tokens,
+            **{key: debug.get(key) for key in ("finish_reason", "error_code", "thinking_parameter", "thinking_result")},
+            "usage": debug.get("usage") or {}}
 
 
 @lru_cache
@@ -151,7 +186,8 @@ async def extract_facts(config, batch, builder, trail, budget, repair=None):
     if repair is not None:
         instruction += "\n" + prompt("repair")
     configured = replace(config, domain_instruction=instruction, extraction_schema={}, require_source_quote=False,
-                         request_budget=min(budget, 2), max_tokens=batch_output_limit(config), disable_thinking=True)
+                         request_budget=min(budget, 2), max_tokens=batch_output_limit(config),
+                         disable_thinking=disable_semantic_thinking(config))
     reference = related_reference(batch, builder) or {}
     if repair is not None:
         reference.update(repair)
@@ -235,12 +271,15 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
         errors = candidate_errors(payload) if result.extracted_json is not None else result.debug_info.get("validation_errors", [])
         if result.status != "success":
             last_error = result
-            if code in {"authentication_failed", "model_access_denied", "provider_forbidden", "unconfigured", "service_unavailable"}:
+            if code in {"authentication_failed", "model_access_denied", "provider_forbidden", "unconfigured",
+                        "service_unavailable", "thinking_parameter_rejected"}:
                 skip_reason = code
-        cut = result.debug_info.get("finish_reason") == "length" or code == "output_truncated"
+        cut = result.debug_info.get("finish_reason") == "length" or code in TRUNCATION_CODES
         full = count_rows(locally_valid(payload)) >= MAX_BATCH_ROWS
         if cut or full:
-            overflow = "output_truncated" if cut else "batch_record_limit"
+            overflow = "batch_record_limit"
+            if cut:
+                overflow = code if code in TRUNCATION_CODES else "output_truncated"
             if not payload:
                 payload = constrain_citations(recovered_rows(result.debug_info.get("raw_response", "")), batch)
             if payload:
@@ -327,7 +366,7 @@ async def execute(config: ExtractorConfig, message: Document, files: list[Docume
                   f"{len(batches)} 个批次待处理，可在校验问题中查看原因", skip_reason)
     incomplete = bool(failed) or any(report.status != "complete" for report in builder.model.metadata.batches)
     incomplete |= any(issue.code in {"candidate_shape", "evidence_not_located", "revision_pending", "revision_target_unresolved",
-                                     "revision_value_unresolved", "empty_extraction"}
+                                     "revision_value_unresolved", "revision_review_required", "empty_extraction"}
                       for issue in builder.issues)
     have_facts = bool(builder.by_id)
     status = "failed" if not have_facts else "partial" if incomplete else "complete"

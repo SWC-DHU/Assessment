@@ -70,7 +70,7 @@ def score(data, gold, docs, *, schema_valid):
     predicted_ops = {(op.get("number"), op.get("name")) for op in ops
                      if isinstance(op.get("name"), str) and (op.get("number") is None or isinstance(op["number"], str))}
     predicted_edges = set()
-    is_versioned = data.get("schema_version") in {"2.0.0", "2.1.0"}
+    is_versioned = data.get("schema_version") in {"2.0.0", "2.1.0", "2.2.0"}
     for edge in rows(data, "relations"):
         if (not all(isinstance(edge.get(field), str) for field in ("type", "source_id", "target_id"))
                 or edge["type"] not in scope or edge.get("status") not in {None, "verified"}):

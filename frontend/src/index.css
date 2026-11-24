@@ -663,3 +663,31 @@ button:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus
   .result-tabs button svg { display: none; }
   .chat-start { margin-top: 24px; }
 }
+
+.result-tabs { flex-wrap: wrap; row-gap: 0; }
+.task-summary {
+  border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 0; background: var(--surface);
+}
+.task-summary header, .handoff-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.task-summary h4, .handoff-operations h4 { font-size: 13px; font-weight: 650; margin: 0 0 6px; }
+.task-summary p { margin: 0; }
+.task-summary .fact-grid { margin: 4px 0; }
+.task-summary summary { color: var(--accent); font-size: 12px; cursor: pointer; }
+.handoff-status { padding: 9px 12px; border-radius: 6px; background: var(--paper); font-size: 12px; }
+.review-pill[data-state="ready"] { background: var(--accent-faint); color: var(--accent); }
+.review-pill[data-state="ready_with_warnings"] { background: #f6efe1; color: var(--warning); }
+.review-pill[data-state="blocked"] { background: #f5e9e6; color: var(--error); }
+.handoff-operations { display: grid; gap: 8px; }
+.handoff-operations summary span { display: block; color: var(--subtle); margin-top: 3px; font-size: 11px; }
+.handoff-facts { list-style: none; padding: 0; margin: 0; }
+.handoff-workspace .json-code, .contract-fields .json-code { max-height: min(50vh, 480px); }
+.contract-fields { display: grid; gap: 12px; min-width: 0; }
+.contract-fields p, .contract-fields dl { margin: 0; }
+.contract-field-list { max-height: 46vh; overflow: auto; }
+.contract-field-list > div { padding: 8px 4px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.contract-field-list dt { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+.contract-field-list dd { color: var(--subtle); padding-top: 3px; }
+.contract-field-list dt span { font-size: 11px; color: var(--subtle); }
+.source-location { margin: 0 0 10px; color: var(--subtle); overflow-wrap: anywhere; }
+[data-source-cell] { background: var(--accent-faint); outline: 1px solid var(--accent); border-radius: 3px; }
+.message-source-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; }

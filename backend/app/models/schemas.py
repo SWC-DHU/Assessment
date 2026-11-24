@@ -3,7 +3,7 @@ from typing import Any, Literal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.services.llm_extractor import normalize_base_url
+from app.services.llm_extractor import SemanticThinking, ThinkingParameter, ThinkingResult, normalize_base_url
 from domain_semantics.schema import SCHEMA_VERSION
 
 
@@ -33,6 +33,8 @@ class AgentExecutionConfig(BaseModel):
     timeout_seconds: int | None = Field(default=None, ge=1, le=600)
     request_budget: int | None = Field(default=None, ge=1, le=32)
     batch_max_tokens: int | None = Field(default=None, ge=64, le=128000)
+    semantic_thinking: SemanticThinking | None = None
+    thinking_parameter: ThinkingParameter = "thinking"
     llm_disambiguation: bool = True
 
 
@@ -137,6 +139,22 @@ class AgentConnectionTestResponse(BaseModel):
     effective_model: str = ""
     json_mode_supported: bool | None = None
     available_models: list[str] = Field(default_factory=list)
+
+
+class AgentJsonProbeRequest(AgentConnectionTestRequest):
+    max_tokens: int = Field(default=4096, ge=64, le=128000)
+    execution: AgentExecutionConfig = Field(default_factory=AgentExecutionConfig)
+
+
+class AgentJsonProbeResponse(BaseModel):
+    ok: bool
+    message: str
+    max_tokens: int
+    finish_reason: str | None = None
+    error_code: str | None = None
+    thinking_parameter: ThinkingParameter | None = None
+    thinking_result: ThinkingResult | None = None
+    usage: dict[str, int] = Field(default_factory=dict)
 
 
 class AgentModelsResponse(BaseModel):

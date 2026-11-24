@@ -9,6 +9,8 @@ from app.models.schemas import (
     AgentConnectionTestRequest,
     AgentExecutionConfig,
     AgentConnectionTestResponse,
+    AgentJsonProbeRequest,
+    AgentJsonProbeResponse,
     AgentModelsResponse,
     AgentProfileCreate,
     AgentProfileOut,
@@ -16,10 +18,12 @@ from app.models.schemas import (
     mask_api_key,
 )
 from app.services.llm_extractor import (
+    ExtractorConfig,
     list_available_models,
     normalize_base_url,
     test_llm_connection,
 )
+from app.services.semantic_execution import probe_json
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
@@ -197,3 +201,16 @@ async def fetch_agent_models(
         effective_base_url=safe_endpoint(eff_base_url),
         error=err,
     )
+
+
+@router.post("/probe-json", response_model=AgentJsonProbeResponse)
+async def probe_agent_json(payload: AgentJsonProbeRequest, db: Session = Depends(get_db)) -> AgentJsonProbeResponse:
+    base_url, api_key, model = _resolve_test_credentials(payload, db)
+    execution = payload.execution
+    config = ExtractorConfig(
+        base_url=base_url, api_key=api_key, model=model,
+        max_tokens=payload.max_tokens, semantic_batch_max_tokens=execution.batch_max_tokens,
+        semantic_thinking=execution.semantic_thinking, thinking_parameter=execution.thinking_parameter,
+        timeout_seconds=min(execution.timeout_seconds or settings.llm_timeout_seconds, 30),
+    )
+    return AgentJsonProbeResponse.model_validate(await probe_json(config))

@@ -2,9 +2,10 @@
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-SCHEMA_VERSION = "2.1.0"
+SCHEMA_VERSION = "2.2.0"
+SchemaVersion = Literal["1.0.0", "2.0.0", "2.1.0", "2.2.0"]
 ReviewState = Literal["verified", "pending", "conflict", "invalid", "unprocessed"]
 RelationKind = Literal[
     "hasComponent", "hasPredecessor", "consumes", "produces", "requiresCapability",
@@ -164,6 +165,28 @@ class Validation(DomainRecord):
     issues: list[Issue] = Field(default_factory=list)
 
 
+class HandoffIssue(Issue):
+    severity: Literal["blocker", "warning"]
+    operation_ids: list[str] = Field(default_factory=list)
+
+
+class HandoffValidation(DomainRecord):
+    status: Literal["ready", "ready_with_warnings", "blocked"]
+    issues: list[HandoffIssue] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def check_status(self):
+        if self.status != self.status_for(self.issues):
+            raise ValueError("交接状态与问题严重程度不一致")
+        return self
+
+    @staticmethod
+    def status_for(issues):
+        if any(item.severity == "blocker" for item in issues):
+            return "blocked"
+        return "ready_with_warnings" if issues else "ready"
+
+
 class GraphNode(DomainRecord):
     id: str
     name: str
@@ -226,8 +249,21 @@ class Objective(Fact):
     description: str
 
 
+ModelingScope = Literal["production_line", "workstation", "operation", "product"]
+
+
+class ModelingTask(DomainRecord):
+    task_type: Literal["digital_twin_modeling"]
+    target_scope: ModelingScope | None = None
+    target_product_id: str | None = Field(default=None, min_length=1)
+    required_outputs: list[Literal["digital_twin_model"]] = Field(default_factory=list)
+    objective_ids: list[str] = Field(min_length=1)
+    constraint_ids: list[str] = Field(default_factory=list)
+    review_evidence: list[Evidence] = Field(default_factory=list)
+
+
 class RequirementSemanticModel(DomainRecord):
-    schema_version: Literal["1.0.0", "2.0.0", "2.1.0"] = SCHEMA_VERSION
+    schema_version: SchemaVersion = SCHEMA_VERSION
     ontology_version: str
     vocabulary_version: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -239,6 +275,7 @@ class RequirementSemanticModel(DomainRecord):
     metadata: RequirementMetadata | None = None
     material_states: list[MaterialState] = Field(default_factory=list)
     modeling_intents: list[Objective] = Field(default_factory=list)
+    modeling_task: ModelingTask | None = None
     process_graph: ProcessGraph | None = None
     evidences: dict[str, Evidence] = Field(default_factory=dict)
     products: list[Product] = Field(default_factory=list)

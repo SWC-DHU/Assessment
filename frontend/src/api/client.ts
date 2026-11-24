@@ -1,6 +1,8 @@
 import type {
   AgentConnectionTestPayload,
   AgentConnectionTestResponse,
+  AgentJsonProbePayload,
+  AgentJsonProbeResponse,
   AgentModelsResponse,
   AgentProfile,
   AgentProfilePayload,
@@ -9,6 +11,7 @@ import type {
   OutputTemplatePayload,
   RunChatResponse,
   OntologyCatalog, PipelineStage, ProcessGraph, ReviewRequest,
+  ContractKind, ContractSchema, ResourceMatchingInput,
   SampleDataset,
   SemanticVersion,
   SemanticModel,
@@ -39,6 +42,16 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+const schemaPaths: Record<ContractKind, string> = {
+  candidates: "/api/semantics/candidates/schema",
+  formal: "/api/semantics/schema",
+  handoff: "/api/semantics/handoff/schema",
+};
+
+function versionUrl(sessionId: string, version: string) {
+  return `/api/semantics/sessions/${encodeURIComponent(sessionId)}/versions/${encodeURIComponent(version)}`;
+}
+
 export const api = {
   // Samples & Env
   getSamples: () =>
@@ -64,6 +77,12 @@ export const api = {
     request<void>(`/api/agents/${id}`, { method: "DELETE" }),
   testAgentConnection: (payload: AgentConnectionTestPayload) =>
     request<AgentConnectionTestResponse>("/api/agents/test-connection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  probeAgentJson: (payload: AgentJsonProbePayload) =>
+    request<AgentJsonProbeResponse>("/api/agents/probe-json", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -175,8 +194,14 @@ export const api = {
 
   getOntology: (version?: string) =>
     request<OntologyCatalog>(`/api/semantics/catalog${version ? `?version=${encodeURIComponent(version)}` : ""}`),
-  getProcessGraph: (sessionId: string, version: string) =>
-    request<ProcessGraph>(`/api/semantics/sessions/${sessionId}/versions/${version}/graph`),
+  getProcessGraph: (sessionId: string, version: string, signal?: AbortSignal) =>
+    request<ProcessGraph>(`${versionUrl(sessionId, version)}/graph`, { signal }),
+  getContractSchema: (kind: ContractKind, signal: AbortSignal) =>
+    request<ContractSchema>(schemaPaths[kind], { signal }),
+  getResourceMatchingInput: (sessionId: string, version: string, signal: AbortSignal) =>
+    request<ResourceMatchingInput>(`${versionUrl(sessionId, version)}/handoff`, { signal }),
+  exportResourceMatchingUrl: (sessionId: string, version: string) => `${versionUrl(sessionId, version)}/handoff/export`,
+  exportSemanticVersionUrl: (sessionId: string, version: string) => `${versionUrl(sessionId, version)}/export`,
   reviewVersion: (sessionId: string, version: string, payload: ReviewRequest) =>
     request<SemanticModel>(`/api/semantics/sessions/${sessionId}/versions/${version}/review`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),

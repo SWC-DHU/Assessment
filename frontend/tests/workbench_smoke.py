@@ -1,5 +1,6 @@
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
 from pathlib import Path
 import re
 from threading import Event, Thread
@@ -60,6 +61,9 @@ def verify_topology_canvas(page, screenshots):
     assert detail.bounding_box()["x"] >= viewport.bounding_box()["x"] + viewport.bounding_box()["width"]
     detail.get_by_role("tab", name="原文证据").click()
     expect(detail.get_by_role("button", name="工艺需求文件.xlsx").first).to_be_visible()
+    detail.get_by_role("button", name="工艺需求文件.xlsx").first.click()
+    expect(page.get_by_role("dialog").locator("[data-source-cell]")).to_contain_text("模组堆叠总装")
+    page.keyboard.press("Escape")
     if screenshots:
         page.screenshot(path=screenshots / "topology-evidence.png")
     detail.get_by_role("tab", name="关联事实").click()
@@ -255,17 +259,16 @@ def verify_mixed_overview(browser, base_url, workbook, screenshots):
     if not narrative.is_file():
         return
     page = browser.new_page(viewport={"width": 1512, "height": 982}, timezone_id="Asia/Shanghai")
-    session = page.request.post(base_url + "/api/sessions", data={}).json()
-    url = f"{base_url}/api/sessions/{session['id']}"
-    files = page.request.post(url + "/files", multipart={"files": {
-        "name": workbook.name, "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "buffer": workbook.read_bytes(),
-    }}).json()
-    run = page.request.post(url + "/run", data={
-        "message": narrative.read_text(), "file_ids": [files[0]["id"]], "use_demo_fallback": True,
-    })
-    assert run.ok, run.text()
     page.goto(base_url)
+    with page.expect_response(lambda response: response.url.endswith("/api/sessions") and response.request.method == "POST"):
+        page.get_by_role("button", name="新建会话").click()
+    page.locator('input[type=file]').set_input_files(str(workbook))
+    expect(page.get_by_text(workbook.name, exact=True).first).to_be_visible()
+    page.get_by_label("输入工艺需求").fill(narrative.read_text())
+    with page.expect_response(lambda response: response.url.endswith("/run") and response.request.method == "POST") as running:
+        page.get_by_role("button", name="开始解析").click()
+    original_id = running.value.json()["current_extracted_json"]["semantic"]["run_id"]
+    expect(page.get_by_role("button", name="打开语义结果 →").last).to_be_visible(timeout=12000)
     page.get_by_role("button", name="打开语义结果 →").last.click()
     amount = page.get_by_role("button", name=re.compile(r"方形电芯.*8 个"))
     limit = page.get_by_role("button", name=re.compile(r"≤ 120 s \/ 模组"))
@@ -277,6 +280,47 @@ def verify_mixed_overview(browser, base_url, workbook, screenshots):
     detail = page.get_by_role("complementary", name="语义详情")
     detail.get_by_role("tab", name="原文证据").click()
     expect(detail.get_by_text(re.compile(r"设计下线节拍不超过120"))).to_be_visible()
+    detail.get_by_role("button", name=re.compile("用户消息")).click()
+    source = page.get_by_role("dialog", name="用户消息原文")
+    expect(source.locator("mark")).to_contain_text("120 s/模组")
+    page.keyboard.press("Escape")
+    page.get_by_role("tab", name="下游交接").click()
+    expect(page.get_by_role("heading", name="下游标准输入")).to_be_visible()
+    expect(page.get_by_text("带警告可交接", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="工艺拓扑 · 15 条边")).to_be_visible()
+    page.get_by_text("标准 JSON 预览", exact=True).click()
+    expect(page.locator(".handoff-workspace .json-code")).to_contain_text('"required_capability_codes"')
+    with page.expect_download() as download:
+        page.get_by_role("link", name="导出交接 JSON").click()
+    data = json.loads(Path(download.value.path()).read_text())
+    assert data["handoff_validation"]["status"] == "ready_with_warnings"
+    assert len(data["operation_requirements"]) == 16
+    page.get_by_role("button", name="查看 Schema").click()
+    contracts = page.get_by_role("dialog", name="数据契约")
+    expect(contracts.get_by_text("operation_requirements", exact=True)).to_be_visible()
+    contracts.get_by_role("tab", name="候选抽取").click()
+    expect(contracts.get_by_text("ExtractionCandidates", exact=True)).to_be_visible()
+    contracts.get_by_role("tab", name="正式语义").click()
+    expect(contracts.get_by_role("tabpanel", name="正式语义").get_by_text("modeling_task", exact=True)).to_be_visible()
+    page.keyboard.press("Escape")
+    if screenshots:
+        page.screenshot(path=screenshots / "handoff-desktop.png")
+    page.get_by_role("tab", name="概览").click()
+    page.get_by_role("button", name="人工审核").click()
+    review = page.get_by_role("dialog", name="人工审核 · 保存为新版本")
+    review.get_by_label("审核动作").click()
+    page.get_by_role("option", name="确认建模任务", exact=True).click()
+    review.get_by_label("目标产品").click()
+    page.get_by_role("option", name="标准模组", exact=True).click()
+    review.get_by_label("审核依据").fill("确认组成段落的标准模组为本次建模目标产品")
+    review.get_by_role("button", name="保存审核版本").click()
+    expect(review).to_be_hidden()
+    page.get_by_role("tab", name="下游交接").click()
+    expect(page.locator(".handoff-workspace .task-summary").get_by_role("button", name="标准模组")).to_be_visible()
+    page.get_by_label("结果版本").click()
+    page.get_by_role("option", name=re.compile(original_id[:6])).click()
+    expect(page.locator(".handoff-workspace .result-heading")).to_contain_text(original_id[:8])
+    expect(page.locator(".handoff-workspace .task-summary").get_by_role("button", name="标准模组")).to_have_count(0)
     page.close()
 
 
@@ -308,6 +352,13 @@ with sync_playwright() as pw:
     expect(page.get_by_role("heading", name="制造需求概览")).to_be_visible()
     if args.screenshots:
         page.screenshot(path=args.screenshots / "desktop.png")
+    page.get_by_role("tab", name="下游交接").click()
+    expect(page.get_by_text("交接阻塞", exact=True)).to_be_visible()
+    expect(page.get_by_text("缺少明确的建模任务，请补充来源或通过人工审核确认", exact=True)).to_be_visible()
+    with page.expect_download() as diagnostic_download:
+        page.get_by_role("link", name="导出诊断 JSON").click()
+    diagnostic = json.loads(Path(diagnostic_download.value.path()).read_text())
+    assert diagnostic["handoff_validation"]["status"] == "blocked"
     page.get_by_role("tab", name="校验问题").click()
     expect(page.get_by_text("原文给出不合格产出，后续处理路径待确认", exact=True)).to_be_visible()
     page.get_by_role("button", name="定位事实").first.click()
@@ -372,6 +423,10 @@ with sync_playwright() as pw:
         expect(page.get_by_role("heading", name="解析结果")).to_be_visible()
         assert page.evaluate("document.documentElement.scrollWidth === innerWidth"), width
         assert page.evaluate("document.querySelector('main').scrollWidth <= innerWidth"), width
+        if width == 320:
+            page.get_by_role("tab", name="下游交接").click()
+            expect(page.get_by_role("link", name="导出诊断 JSON")).to_be_visible()
+            assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
         if width == 390:
             if args.screenshots:
                 page.screenshot(path=args.screenshots / "mobile.png")

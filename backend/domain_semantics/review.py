@@ -4,8 +4,10 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from .catalog import load_vocabulary
-from .pipeline import Builder
-from .schema import Capability, DomainRecord, Operation, ProcessRelation, QuantitySpecification
+from .modeling_task import TASK_KIND
+from .pipeline import Builder, record_id
+from .schema import (Capability, DomainRecord, ModelingScope, ModelingTask, Objective, Operation, ProcessRelation,
+                     Product, QuantitySpecification)
 from .sources import message_document
 
 
@@ -46,8 +48,14 @@ class ConfirmFact(ReviewAction):
     fact_id: str
 
 
+class SetModelingTask(ReviewAction):
+    action: Literal["set_modeling_task"]
+    target_scope: ModelingScope | None = None
+    target_product_id: str | None = None
+
+
 ReviewRequest = Annotated[
-    RenameOperation | SetComponentQuantity | ConfirmCapability | AddTransition | ConfirmFact,
+    RenameOperation | SetComponentQuantity | ConfirmCapability | AddTransition | ConfirmFact | SetModelingTask,
     Field(discriminator="action"),
 ]
 
@@ -103,10 +111,23 @@ def apply_review(base, run_id, message_id, review: ReviewRequest):
         fact = builder.relation(review.type, review.source_id, review.target_id, [cite],
                                 origin="manual", condition=review.condition, max_iterations=review.max_iterations)
         fact.asserted_as = "explicit"
+    elif isinstance(review, SetModelingTask):
+        if review.target_product_id is not None:
+            product = require(review.target_product_id, Product)
+            if product.status != "verified":
+                raise ValueError("请选择已核验的目标产品")
+        fact = next((item for item in builder.model.modeling_intents if item.kind == TASK_KIND), None)
+        if fact is None:
+            fact = builder.add("modeling_intents", Objective(
+                id=record_id("intent", TASK_KIND), kind=TASK_KIND, description=review.note.strip(), evidence=[cite],
+            ))
+        history = base.modeling_task.review_evidence if base.modeling_task else []
+        builder.model.modeling_task = ModelingTask(
+            task_type=TASK_KIND, target_scope=review.target_scope, target_product_id=review.target_product_id,
+            objective_ids=[fact.id], required_outputs=["digital_twin_model"], review_evidence=[*history, cite],
+        )
     else:
         fact = builder.by_id.get(review.fact_id)
-        if fact is None:
-            fact = next((item for item in builder.model.modeling_intents if item.id == review.fact_id), None)
         if fact is None:
             raise ValueError("确认对象不存在")
         if isinstance(fact, ProcessRelation) and fact.asserted_as == "inferred":

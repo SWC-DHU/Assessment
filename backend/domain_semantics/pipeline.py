@@ -11,13 +11,15 @@ from pydantic import ValidationError
 
 from . import candidates as candidate_schema
 from .catalog import candidates, capability_terms, load_vocabulary, normalize, normalize_term, ontology_metadata
+from .modeling_task import TASK_KIND, build_modeling_task, task_statement
 from .process_graph import build_process_graph
 from .schema import (Capability, Constraint, InformationFlow, Issue, Material, MaterialState, Objective, Operation,
                      ProcessRelation, Product, QuantitySpecification, RequirementMetadata, SCHEMA_VERSION,
                      SemanticModel)
 from .sources import Document, Fragment, digest, locate
 from .structured_text import operation_declarations
-from .validation import COLLECTIONS, QUANTITY, canonical_unit, measurements, tabular_measurements, validate_model
+from .validation import (COLLECTIONS, COMPUTED_ISSUE_CODES, QUANTITY, canonical_unit, constraint_strength, measurements,
+                         summarize_validation, tabular_measurements, validate_model)
 
 MODELS = dict(zip(COLLECTIONS, (Product, Operation, Material, MaterialState, Capability, Constraint)))
 CANDIDATES = dict(zip((*COLLECTIONS, "objectives", "relations"), (
@@ -213,14 +215,11 @@ class Builder:
         self.model.metadata = RequirementMetadata(ontology_version=self.model.ontology_version)
         self.documents = documents
         self.batch = run_id
-        computed = {"source_not_found", "evidence_pending", "duplicate_id", "relation_reference", "condition_required",
-                    "rework_limit_pending", "unexpected_rework_limit", "precedence_cycle", "constraint_target",
-                    "parameter_unmapped", "parameter_unknown", "unit_mismatch", "quantity_unsupported",
-                    "range_bounds", "constraint_conflict", "capability_unmapped", "capability_unknown"}
-        self.issues = [issue for issue in base.unresolved_items if issue.code not in computed
+        self.issues = [issue for issue in base.unresolved_items if issue.code not in COMPUTED_ISSUE_CODES
                        and not issue.code.startswith(("graph_", "batch_")) and not issue.path.startswith("batch-")
                        and issue.code not in {"conditional_route_missing", "merge_predecessors_pending", "file_parse_error"}] if base else []
-        self.by_id = {fact.id: fact for group in (*COLLECTIONS, "relations") for fact in getattr(self.model, group)}
+        self.by_id = {fact.id: fact for group in (*COLLECTIONS, "relations", "modeling_intents")
+                      for fact in getattr(self.model, group)}
         self.aliases = {option: item.id for group in COLLECTIONS for item in getattr(self.model, group)
                         for option in (item.id, item.name, getattr(item, "number", None)) if option}
         self.information_aliases = {}
@@ -351,9 +350,7 @@ class Builder:
 
     def constraint(self, name, target, evidence, *, description=None, **attributes):
         if "strength" not in attributes:
-            quotes = " ".join(item.quote for item in evidence)
-            attributes["strength"] = ("mandatory" if re.search(r"必须|不得|禁止|must", quotes, re.I)
-                                      else "preferred" if re.search(r"建议|优先|prefer", quotes, re.I) else "unspecified")
+            attributes["strength"] = constraint_strength(evidence)
         # Canonical parameter and amount determine numeric fact identity across wordings.
         identity = [attributes.get("parameter_code") or name, target, description] + [
             attributes.get(key) for key in ("comparator", "value", "lower", "upper", "unit", "basis")
@@ -365,6 +362,8 @@ class Builder:
         value = Constraint(id=record_id("constraint", key), name=name, target_id=target, evidence=evidence,
                            description=description, **attributes)
         stored = self.add("constraints", value)
+        if stored is not value and stored.review != "confirmed":
+            stored.strength = constraint_strength(stored.evidence)
         self.relation("appliesTo", stored.id, target, evidence,
                       origin="user" if any(item.location.message_id for item in evidence) else "document")
         return stored
@@ -418,7 +417,8 @@ class Builder:
                     if not term or normalize(term) in EMPTY:
                         continue
                     if field == "capabilities":
-                        items = re.split(r"与|和|及", term)
+                        material_phrase = re.sub(r"^(?:汇合|合流|并入)\s*", "", term)
+                        items = re.split(r"与|和|及", material_phrase)
                         if items and all(item.strip() in material_terms for item in items):
                             continue
                         for short in capability_terms(term):
@@ -521,14 +521,21 @@ class Builder:
                 material = self.add("materials", Material(id=record_id("material", name), name=name, evidence=evidence))
                 self.relation("hasComponent", product.id, material.id, evidence, origin="user", quantity=quantity)
                 count += 1
+        clauses = re.split(r"[。！？.!?；;\n]", fragment.text)
+        for clause in clauses:
+            if statement := task_statement(clause):
+                self.add("modeling_intents", Objective(
+                    id=record_id("intent", TASK_KIND), kind=TASK_KIND,
+                    description=statement, evidence=[fragment.evidence(self.batch, statement, "rule")],
+                ))
+                count += 1
         intents = {
-            "digital_twin_modeling": r"数字孪生仿真模型|数字孪生模型构建",
             "resource_matching": r"设备匹配|资源匹配",
             "model_linking": r"模型关联构建|模型关联",
             "simulation_validation": r"仿真验证|仿真校核",
         }
         for kind, words in intents.items():
-            for clause in re.split(r"[。；\n]", fragment.text):
+            for clause in clauses:
                 match = re.search(words, clause)
                 if match and not re.search(rf"(?:不需要|无需|不做|禁止)\s*(?:{words})", clause):
                     evidence = [fragment.evidence(self.batch, match[0], "rule")]
@@ -582,6 +589,8 @@ class Builder:
         return evidence
 
     def candidate_rows(self, payload, scopes):
+        for group in payload.keys() - CANDIDATES.keys():
+            self.issue("candidate_shape", "未知候选字段", group, "invalid")
         for group, schema in CANDIDATES.items():
             raw = payload.get(group, [])
             if not isinstance(raw, list):
@@ -732,9 +741,9 @@ class Builder:
                 values.pop("name")
                 if values.get("description") and values["description"] not in quotes:
                     values["description"] = None
+                if not any(values[key] is not None for key in ("comparator", "value", "lower", "upper")):
+                    values["description"] = values.get("description") or "；".join(entry.quote for entry in evidence)
                 self.constraint(item.name, target, evidence, parameter_code=params[0] if len(params) == 1 else None,
-                                strength="mandatory" if re.search(r"必须|不得|禁止|must", quotes, re.I) else
-                                "preferred" if re.search(r"建议|优先|prefer", quotes, re.I) else "unspecified",
                                 **{**values, "unit": canonical_unit(item.unit)})
                 continue
             for optional in ("number", "operation_type", "material_type", "part_number", "unit"):
@@ -796,7 +805,11 @@ class Builder:
             self.issue("revision_value_unresolved", "修订数值或单位无法核验", target)
             return True
         _, value, _, unit, basis = values[0]
-        superseded = {item.id for item in self.model.constraints if item.target_id == target and item.parameter_code == code}
+        matching = [item for item in self.model.constraints if item.target_id == target and item.parameter_code == code]
+        if any(item.review == "confirmed" for item in matching):
+            self.issue("revision_review_required", "已确认的约束需要人工审核后才能修订", target)
+            return True
+        superseded = {item.id for item in matching}
         self.model.constraints = [item for item in self.model.constraints if item.id not in superseded]
         removed = {item.id for item in self.model.relations if item.source_id in superseded}
         self.model.relations = [item for item in self.model.relations if item.id not in removed]
@@ -839,7 +852,7 @@ class Builder:
         canonical = {}
         replacements = {}
         for item in self.model.capabilities:
-            if item.code not in vocabulary:
+            if item.code not in vocabulary or (item.mapping == "adjudicated" and item.review != "confirmed"):
                 continue
             key = record_id("capability", item.code)
             replacements[item.id] = key
@@ -886,6 +899,7 @@ class Builder:
 
     def finish(self, tool=None):
         self.consolidate_capabilities()
+        self.model.modeling_task = build_modeling_task(self.model)
         started, clock = timestamp()
         if tool:
             tool("validate_semantics", f"{len(self.by_id)} 项带引用的事实", validate_model, self.model, self.issues, tool)
@@ -903,12 +917,12 @@ class Builder:
         for entity in self.model.products:
             entity.component_ids = lookup["hasComponent", entity.id]
         for entity in self.model.operations:
-            entity.predecessor_ids = lookup["hasPredecessor", entity.id]
-            entity.input_material_ids = lookup["consumes", entity.id]
-            entity.output_material_ids = lookup["produces", entity.id]
-            entity.input_state_ids = lookup["hasInputState", entity.id]
-            entity.output_state_ids = lookup["hasOutputState", entity.id]
-            entity.capability_ids = lookup["requiresCapability", entity.id]
+            entity.predecessor_ids = list(dict.fromkeys(lookup["hasPredecessor", entity.id]))
+            entity.input_material_ids = list(dict.fromkeys(lookup["consumes", entity.id]))
+            entity.output_material_ids = list(dict.fromkeys(lookup["produces", entity.id]))
+            entity.input_state_ids = list(dict.fromkeys(lookup["hasInputState", entity.id]))
+            entity.output_state_ids = list(dict.fromkeys(lookup["hasOutputState", entity.id]))
+            entity.capability_ids = list(dict.fromkeys(lookup["requiresCapability", entity.id]))
             entity.constraint_ids = [item.id for item in self.model.constraints if item.target_id == entity.id]
         for entity in self.model.materials:
             entity.consumed_by = inverse["consumes", entity.id]
@@ -920,15 +934,17 @@ class Builder:
         self.model.process_graph = (tool("build_process_graph", f"{len(self.model.operations)} 个工序", build_process_graph, self.model)
                                     if tool else build_process_graph(self.model))
         graph_issues = self.model.process_graph.issues
-        self.model.validation.issues.extend(graph_issues)
-        if self.model.validation.status == "verified" and graph_issues:
-            self.model.validation.status = "pending"
-        self.model.unresolved_items = self.model.validation.issues
+        summarize_validation(self.model, [*self.model.validation.issues, *graph_issues])
         if not tool:
             self.stages.append(trace("build_process_graph", *graph_start, self.model.validation.status,
                                      f"{len(self.model.process_graph.nodes)} 节点 · {len(self.model.process_graph.edges)} 边"))
         for fact in self.by_id.values():
             for item in [*fact.evidence, *fact.review_evidence, *getattr(fact, "equipment_evidence", [])]:
+                key = digest(json.dumps([item.document_id, item.fragment_id, item.quote, item.extraction_batch, item.method],
+                                        ensure_ascii=False))
+                self.model.evidences[key] = item
+        if self.model.modeling_task:
+            for item in self.model.modeling_task.review_evidence:
                 key = digest(json.dumps([item.document_id, item.fragment_id, item.quote, item.extraction_batch, item.method],
                                         ensure_ascii=False))
                 self.model.evidences[key] = item
@@ -950,7 +966,7 @@ class Builder:
         self.model.content_digest = digest(json.dumps(content(data), ensure_ascii=False, sort_keys=True))
         self.stages.append(trace("instantiation", started, clock, "success",
                                  f"{len(self.by_id)} 项实体与关系，已建立双向引用"))
-        return self.model
+        return SemanticModel.model_validate_json(self.model.model_dump_json())
 
 
 def project(documents: list[Document], run_id: str, payload: dict | None = None) -> SemanticModel:

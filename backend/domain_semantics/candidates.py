@@ -1,16 +1,20 @@
 """Candidate exchange format. The model can propose facts and source pointers only."""
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from .schema import Comparator, DomainRecord, QuantitySpecification, RelationKind
 
 
-class Citation(DomainRecord):
+class CandidateRecord(DomainRecord):
+    model_config = ConfigDict(strict=True)
+
+
+class Citation(CandidateRecord):
     quote: str = Field(min_length=1)
     document_id: str | None = None
     fragment_id: str | None = None
 
 
-class NamedCandidate(DomainRecord):
+class NamedCandidate(CandidateRecord):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     evidence: list[Citation] = Field(min_length=1)
@@ -18,7 +22,7 @@ class NamedCandidate(DomainRecord):
 
 class ProductCandidate(NamedCandidate):
     part_number: str | None = None
-    quantity: float | None = None
+    quantity: float | None = Field(default=None, ge=0)
     unit: str | None = None
 
 
@@ -48,18 +52,22 @@ class ConstraintCandidate(NamedCandidate):
     description: str | None = None
 
 
-class RelationCandidate(DomainRecord):
+class CandidateQuantity(QuantitySpecification):
+    model_config = ConfigDict(strict=True)
+
+
+class RelationCandidate(CandidateRecord):
     type: RelationKind
     source_id: str
     target_id: str
     condition: str | None = None
-    max_iterations: int | None = None
-    quantity: QuantitySpecification | None = None
+    max_iterations: int | None = Field(default=None, ge=1)
+    quantity: CandidateQuantity | None = None
     inferred: bool = False
     evidence: list[Citation] = Field(min_length=1)
 
 
-class ExtractionCandidates(DomainRecord):
+class ExtractionCandidates(CandidateRecord):
     products: list[ProductCandidate] = Field(default_factory=list)
     operations: list[OperationCandidate] = Field(default_factory=list)
     materials: list[MaterialCandidate] = Field(default_factory=list)

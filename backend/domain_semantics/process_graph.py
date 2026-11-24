@@ -62,9 +62,9 @@ def build_process_graph(model: RequirementSemanticModel) -> ProcessGraph:
             issue("graph_endpoint", "工艺边存在无效端点或自连接", relation.id, "invalid")
             continue
         status = relation.status
-        if not any(item.status == "verified" for item in relation.evidence) and status == "verified":
+        evidence = [*relation.evidence, *(relation.review_evidence if relation.review == "confirmed" else [])]
+        if not any(item.status == "verified" for item in evidence) and status == "verified":
             status = "pending"
-        evidence = list(relation.evidence)
         if kind in UNCONDITIONAL and by_id[target].category == "merge":
             kind = "merge"
             evidence.extend(cite for cite in by_id[target].evidence

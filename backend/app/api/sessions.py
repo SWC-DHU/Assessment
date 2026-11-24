@@ -418,6 +418,8 @@ async def _execute_extraction_turn(
         timeout_seconds=execution.timeout_seconds or settings.llm_timeout_seconds,
         request_budget=execution.request_budget or request_budget,
         semantic_batch_max_tokens=execution.batch_max_tokens,
+        semantic_thinking=execution.semantic_thinking,
+        thinking_parameter=execution.thinking_parameter,
         llm_disambiguation=execution.llm_disambiguation,
     )
     if source_message is not None and (not config.api_key or config.base_url.startswith("mock://")):

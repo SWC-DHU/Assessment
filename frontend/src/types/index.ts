@@ -12,10 +12,16 @@ export interface ExtractionSchemaConfig {
   json_schema: Record<string, unknown>;
 }
 
+export type SemanticThinking = "service_default" | "disabled";
+export type ThinkingParameter = "thinking" | "reasoning_effort";
+export type ThinkingResult = "reasoning_returned" | "zero_reported" | "unverified" | "rejected";
+
 export interface AgentExecutionConfig {
   timeout_seconds: number | null;
   request_budget: number | null;
   batch_max_tokens: number | null;
+  semantic_thinking: SemanticThinking | null;
+  thinking_parameter: ThinkingParameter;
   llm_disambiguation: boolean;
 }
 
@@ -134,6 +140,8 @@ interface ProviderAttempt {
   finish_reason?: string | null;
   error_code?: string;
   thinking?: "disabled";
+  thinking_parameter?: ThinkingParameter;
+  thinking_result?: ThinkingResult;
   usage?: TokenUsage;
 }
 
@@ -232,6 +240,22 @@ export interface AgentConnectionTestResponse {
   available_models: string[];
 }
 
+export interface AgentJsonProbePayload extends AgentConnectionTestPayload {
+  max_tokens: number;
+  execution: AgentExecutionConfig;
+}
+
+export interface AgentJsonProbeResponse {
+  ok: boolean;
+  message: string;
+  max_tokens: number;
+  finish_reason?: string | null;
+  error_code?: string | null;
+  thinking_parameter?: ThinkingParameter | null;
+  thinking_result?: ThinkingResult | null;
+  usage: TokenUsage;
+}
+
 export interface AgentModelsResponse {
   models: string[];
   effective_base_url: string;
@@ -286,6 +310,7 @@ export interface SemanticEntity {
   output_state_ids?: string[];
   number?: string | null;
   operation_type?: string | null;
+  precursor_declaration?: string[] | null;
   predecessor_ids?: string[];
   input_material_ids?: string[];
   output_material_ids?: string[];
@@ -342,6 +367,26 @@ export interface SemanticIssue {
   status: ReviewState;
 }
 
+export type ModelingScope = "production_line" | "workstation" | "operation" | "product";
+export interface ModelingTask {
+  task_type: "digital_twin_modeling";
+  target_scope: ModelingScope | null;
+  target_product_id: string | null;
+  required_outputs: "digital_twin_model"[];
+  objective_ids: string[];
+  constraint_ids: string[];
+  review_evidence: Evidence[];
+}
+export interface SemanticObjective {
+  id: string;
+  kind: string;
+  description: string;
+  status?: ReviewState;
+  review?: SemanticEntity["review"];
+  evidence: Evidence[];
+  review_evidence?: Evidence[];
+}
+
 export interface SemanticModel extends Record<Exclude<SemanticGroup, "objectives">, SemanticEntity[]> {
   schema_version: string;
   ontology_version: string;
@@ -351,9 +396,8 @@ export interface SemanticModel extends Record<Exclude<SemanticGroup, "objectives
   content_digest: string;
   input_digest: string;
   metadata?: { extraction_status: ExtractionStatus; batches: ExtractionBatch[] } | null;
-  modeling_intents?: (Pick<SemanticEntity, "id" | "evidence" | "review" | "review_evidence"> & {
-    kind: string; description: string; status?: ReviewState;
-  })[];
+  modeling_intents?: SemanticObjective[];
+  modeling_task?: ModelingTask | null;
   process_graph?: ProcessGraph | null;
   source_refs: { document_id: string; name: string; kind: string }[];
   relations: SemanticRelation[];
@@ -404,6 +448,71 @@ export interface ProcessGraph {
     evidence: Evidence[]; relation_ids: string[] }[];
   issues: SemanticIssue[];
 }
+
+export type HandoffStatus = "ready" | "ready_with_warnings" | "blocked";
+export interface HandoffIssue extends SemanticIssue { severity: "blocker" | "warning"; operation_ids: string[] }
+export interface OperationResourceRequirement {
+  operation_id: string;
+  operation_name: string;
+  operation_number: string | null;
+  operation_type: string | null;
+  standard_term: string | null;
+  required_capability_codes: string[];
+  capability_ids: string[];
+  constraint_ids: string[];
+  input_material_ids: string[];
+  output_material_ids: string[];
+  input_state_ids: string[];
+  output_state_ids: string[];
+  predecessor_ids: string[];
+  information_flows: NonNullable<SemanticEntity["information_flows"]>;
+  equipment_requirement: string | null;
+  equipment_evidence: Evidence[];
+  source_status: ReviewState;
+  review: NonNullable<SemanticEntity["review"]>;
+  evidence: Evidence[];
+  review_evidence: Evidence[];
+  has_blocking_issues: boolean;
+}
+export interface ResourceMatchingInput {
+  contract_version: "1.0.0";
+  source_model: Pick<SemanticModel, "run_id" | "schema_version" | "ontology_version" | "vocabulary_version" | "content_digest"> & {
+    extraction_status: ExtractionStatus | null;
+    semantic_validation_status: ReviewState;
+  };
+  modeling_task: ModelingTask | null;
+  target_product_ids: string[];
+  line_constraint_ids: string[];
+  operation_requirements: OperationResourceRequirement[];
+  process_graph: ProcessGraph;
+  products: Record<string, SemanticEntity>;
+  materials: Record<string, SemanticEntity>;
+  material_states: Record<string, SemanticEntity>;
+  capabilities: Record<string, SemanticEntity>;
+  constraints: Record<string, SemanticEntity>;
+  objectives: Record<string, SemanticObjective>;
+  relations: SemanticRelation[];
+  source_refs: SemanticModel["source_refs"];
+  unresolved_items: SemanticIssue[];
+  handoff_validation: { status: HandoffStatus; issues: HandoffIssue[] };
+}
+
+export type ContractKind = "candidates" | "formal" | "handoff";
+export interface ContractSchema {
+  title?: string;
+  description?: string;
+  type?: string;
+  const?: string;
+  enum?: string[];
+  $ref?: string;
+  anyOf?: ContractSchema[];
+  items?: ContractSchema;
+  additionalProperties?: ContractSchema | boolean;
+  properties?: Record<string, ContractSchema>;
+  required?: string[];
+  $defs?: Record<string, ContractSchema>;
+}
+
 export interface OntologyTerm {
   id: string; iri: string; label: string; definition: string; domain: string[]; range: string[]; subclass_of: string[];
 }
@@ -423,4 +532,5 @@ export type ReviewRequest = { note: string } & (
   | { action: "confirm_capability"; capability_id: string; code: string }
   | { action: "add_transition"; source_id: string; target_id: string; type: string; condition?: string; max_iterations?: number }
   | { action: "confirm_fact"; fact_id: string }
+  | { action: "set_modeling_task"; target_scope?: ModelingScope; target_product_id?: string }
 );

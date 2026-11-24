@@ -270,6 +270,86 @@ def test_cancel_before_run_does_not_leave_messages(api):
     assert api.get(url).json()["messages"] == []
 
 
+@pytest.mark.parametrize(("reported", "expected"), [(0, "zero_reported"), (5, "reasoning_returned"),
+                                                      (None, "unverified"), ("reject", "rejected")])
+def test_gateway_json_probe_reports_effect_of_selected_thinking_parameter(api, monkeypatch, reported, expected):
+    calls = []
+
+    def handler(request):
+        call = json.loads(request.content)
+        calls.append(call)
+        if reported == "reject":
+            return httpx.Response(422, json={"error": {"message": "reasoning_effort is not supported"}})
+        usage = {"prompt_tokens": 10, "completion_tokens": 12, "total_tokens": 22}
+        if reported is not None:
+            usage["completion_tokens_details"] = {"reasoning_tokens": reported}
+        return httpx.Response(200, json={
+            "id": "fixture", "object": "chat.completion", "model": "gateway-model", "created": 1,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": '{"value":120,"unit":"s"}'},
+                         "finish_reason": "stop"}], "usage": usage,
+        })
+
+    monkeypatch.setattr(llm_extractor, "AsyncOpenAI", lambda **kwargs: AsyncOpenAI(
+        **kwargs, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    ))
+    result = api.post("/api/agents/probe-json", json={
+        "base_url": "https://gateway.example/v1", "model": "gateway-model", "api_key": "fixture-key",
+        "execution": {"semantic_thinking": "disabled", "thinking_parameter": "reasoning_effort"},
+    }).json()
+    call, = calls
+    assert call["reasoning_effort"] == "none" and "thinking" not in call
+    assert call["max_tokens"] == result["max_tokens"] == 512
+    assert call["response_format"] == {"type": "json_object"}
+    assert result["ok"] == (reported != "reject")
+    assert result["thinking_result"] == expected
+    if reported == "reject":
+        assert result["error_code"] == "thinking_parameter_rejected"
+    else:
+        assert result["finish_reason"] == "stop" and result["usage"].get("reasoning_tokens") == reported
+
+
+def test_gateway_run_and_resume_distinguish_reasoning_exhaustion_and_unstarted_batches(api, monkeypatch):
+    calls = []
+
+    def handler(request):
+        call = json.loads(request.content)
+        calls.append(call)
+        no_thinking = call.get("thinking") == {"type": "disabled"}
+        count = 2 if no_thinking else call["max_tokens"]
+        return httpx.Response(200, json={
+            "id": "fixture", "object": "chat.completion", "model": "gateway-model", "created": 1,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "{}" if no_thinking else None},
+                         "finish_reason": "stop" if no_thinking else "length"}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": count, "total_tokens": 10 + count,
+                      "completion_tokens_details": {"reasoning_tokens": 0 if no_thinking else count}},
+        })
+
+    monkeypatch.setattr(llm_extractor, "AsyncOpenAI", lambda **kwargs: AsyncOpenAI(
+        **kwargs, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    ))
+    agent = api.post("/api/agents", json={
+        "name": "网关测试", "base_url": "https://gateway.example/v1", "api_key": "fixture-key",
+        "model": "gateway-model", "max_tokens": 26383,
+    }).json()
+    session_id = api.post("/api/sessions", json={"agent_id": agent["id"]}).json()["id"]
+    session = f"/api/sessions/{session_id}"
+    partial = api.post(f"{session}/run", json={"message": "整线生产节拍≤60秒/件。工序01清洗。工序02检测。"}).json()
+    assistant = partial["assistant_message"]
+    assert assistant["status"] == "partial"
+    assert [batch["reason"] for batch in assistant["debug_info"]["batches"]] == [
+        "reasoning_budget_exhausted", "request_budget_exhausted",
+    ]
+    assert all("thinking" not in call and call["max_tokens"] == 4096 for call in calls)
+    updated = api.patch(f"/api/agents/{agent['id']}", json={"execution": {
+        "batch_max_tokens": 8192, "request_budget": 4, "semantic_thinking": "disabled",
+    }})
+    assert updated.status_code == 200
+    resumed = api.post(f"{session}/resume/{assistant['id']}").json()["assistant_message"]
+    assert resumed["status"] == "success"
+    assert len(calls) == 4 and [call["max_tokens"] for call in calls[-2:]] == [8192, 8192]
+    assert all(attempt["thinking_result"] == "zero_reported" for attempt in resumed["debug_info"]["provider_attempts"])
+
+
 def test_human_review_creates_traceable_version_and_preserves_original(api):
     session = api.post("/api/sessions", json={}).json()
     sess = f"/api/sessions/{session['id']}"
@@ -327,3 +407,68 @@ def test_upload_reuses_identical_name_and_content_but_keeps_distinct_revisions(a
     assert repeated["id"] == first["id"]
     assert revision["id"] != first["id"]
     assert len(api.get(session_url).json()["files"]) == 2
+
+
+def test_resource_matching_schema_preview_and_export_on_original_inputs(api):
+    from domain_semantics.handoff import ResourceMatchingInput
+
+    root = Path(__file__).resolve().parents[2] / "test case"
+    workbook = root / "工艺需求文件.xlsx"
+    narrative = (root / "自然语言建模需求.md").read_text(encoding="utf-8")
+    base = "/api/semantics"
+    assert api.get(f"{base}/schema").json()["title"] == "RequirementSemanticModel"
+    assert api.get(f"{base}/candidates/schema").json()["title"] == "ExtractionCandidates"
+    assert api.get(f"{base}/handoff/schema").json() == ResourceMatchingInput.model_json_schema()
+    session_id = api.post("/api/sessions", json={}).json()["id"]
+    session = f"/api/sessions/{session_id}"
+    file, = api.post(f"{session}/files", files={"files": (workbook.name, workbook.read_bytes())}).json()
+    assert file["parse_status"] == "success"
+    run = api.post(f"{session}/run", json={"file_ids": [file["id"]], "message": narrative, "use_demo_fallback": True})
+    assert run.status_code == 200
+    data = run.json()
+    model = data["current_extracted_json"]["semantic"]
+    assert data["assistant_message"]["debug_info"]["request_count"] == 0
+    assert model["metadata"]["extraction_status"] == "partial"
+    version = f"{base}/sessions/{session_id}/versions/{model['run_id']}"
+    preview = api.get(f"{version}/handoff")
+    assert preview.status_code == 200
+    handoff = ResourceMatchingInput.model_validate(preview.json())
+    assert handoff.source_model.content_digest == model["content_digest"]
+    assert handoff.handoff_validation.status == "ready_with_warnings"
+    assert len(handoff.operation_requirements) == 16
+    assert {item.code for item in handoff.handoff_validation.issues} >= {
+        "handoff_extraction_coverage", "conditional_route_missing",
+    }
+    assert api.get(f"{version}/graph").json() == preview.json()["process_graph"]
+    download = api.get(f"{version}/handoff/export")
+    assert download.headers["Content-Disposition"] == f'attachment; filename="resource-matching-{model["run_id"]}.json"'
+    assert ResourceMatchingInput.model_validate_json(download.content) == handoff
+    assert api.get(version).json() == api.get(f"{version}/export").json() == model
+    assert api.get(f"{base}/sessions/{session_id}/versions/missing/handoff").status_code == 404
+    other_id = api.post("/api/sessions", json={}).json()["id"]
+    assert api.get(f"{base}/sessions/{other_id}/versions/{model['run_id']}/handoff").status_code == 404
+    assert api.get(f"{base}/sessions/{other_id}/versions/{model['run_id']}/handoff/export").status_code == 404
+
+
+def test_blocked_handoff_is_exportable_and_review_is_version_specific(api):
+    session_id = api.post("/api/sessions", json={}).json()["id"]
+    session = f"/api/sessions/{session_id}"
+    versions = f"/api/semantics/sessions/{session_id}/versions"
+    raw = b"operation id,operation name,capability\nA1,Clean,cleaning"
+    file, = api.post(f"{session}/files", files={"files": ("single.csv", raw)}).json()
+    run = api.post(f"{session}/run", json={"file_ids": [file["id"]], "use_demo_fallback": True})
+    original = run.json()["current_extracted_json"]["semantic"]
+    url = f"{versions}/{original['run_id']}"
+    first = api.get(f"{url}/handoff").json()
+    assert first["handoff_validation"]["status"] == "blocked"
+    assert api.get(f"{url}/handoff/export").json() == first
+    review = api.post(f"{url}/review", json={
+        "action": "set_modeling_task", "target_scope": "workstation", "note": "已确认构建清洗工位的数字孪生模型。",
+    })
+    assert review.status_code == 201, review.text
+    child = review.json()
+    assert child["parent_version_id"] == original["run_id"]
+    child_url = f"{versions}/{child['run_id']}"
+    assert api.get(f"{child_url}/handoff").json()["handoff_validation"]["status"] == "ready"
+    assert api.get(f"{url}/handoff").json() == first
+    assert api.post(f"{child_url}/validate").json() == child["validation"]

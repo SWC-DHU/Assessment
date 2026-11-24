@@ -13,14 +13,16 @@ from app.services.redaction import redact
 from app.services.source_inputs import uploaded_document
 from app.services.semantic_tools import TOOL_CATALOG
 from domain_semantics import SemanticModel
+from domain_semantics.candidates import ExtractionCandidates
 from domain_semantics.catalog import ONTOLOGY_VERSION, normalize_term, query_ontology
+from domain_semantics.handoff import ResourceMatchingInput, build_resource_matching_input
 from domain_semantics.process_graph import build_process_graph
 from domain_semantics.review import ReviewRequest, apply_review
 from domain_semantics.schema import ProcessGraph
 from domain_semantics.pipeline import Builder, legacy_candidates, table_rows
 from domain_semantics.projection import template_context
 from domain_semantics.sources import locate, message_document
-from domain_semantics.validation import COLLECTIONS, validate_model
+from domain_semantics.validation import COLLECTIONS, summarize_validation, validate_model
 
 router = APIRouter(prefix="/api/semantics", tags=["semantics"])
 
@@ -62,6 +64,16 @@ def tools():
 @router.get("/schema")
 def schema() -> dict:
     return SemanticModel.model_json_schema()
+
+
+@router.get("/candidates/schema")
+def candidate_schema() -> dict:
+    return ExtractionCandidates.model_json_schema()
+
+
+@router.get("/handoff/schema")
+def handoff_schema() -> dict:
+    return ResourceMatchingInput.model_json_schema()
 
 
 @router.get("/sessions/{session_id}/versions")
@@ -139,6 +151,19 @@ def export_version(session_id: str, version_id: str, db: Session = Depends(get_d
                     headers={"Content-Disposition": f'attachment; filename="semantic-{version_id}.json"'})
 
 
+@router.get("/sessions/{session_id}/versions/{version_id}/handoff", response_model=ResourceMatchingInput)
+def handoff(session_id: str, version_id: str, db: Session = Depends(get_db)) -> ResourceMatchingInput:
+    model = SemanticModel.model_validate(get_version(db, session_id, version_id).model)
+    return build_resource_matching_input(model)
+
+
+@router.get("/sessions/{session_id}/versions/{version_id}/handoff/export", response_model=ResourceMatchingInput)
+def export_handoff(session_id: str, version_id: str, db: Session = Depends(get_db)) -> Response:
+    value = handoff(session_id, version_id, db)
+    return Response(value.model_dump_json(indent=2), media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="resource-matching-{version_id}.json"'})
+
+
 def source_documents(session: TestSession, file_ids: set[str], message_ids: set[str]):
     docs = [uploaded_document(f) for f in session.files
             if f.id in file_ids and f.parse_status == "success"]
@@ -157,22 +182,27 @@ def revalidate(session_id: str, version_id: str, db: Session = Depends(get_db)):
     docs = source_documents(session, ids, message_ids)
     originals = {ref.document_id: ref.content_sha256 for ref in semantic.source_refs}
     docs = [doc for doc in docs if doc.ref.content_sha256 == originals[doc.ref.document_id]]
+
+    def verify(citations):
+        for cite in citations:
+            located = locate(docs, cite.quote, cite.extraction_batch,
+                             document_id=cite.document_id, fragment_id=cite.fragment_id)
+            cite.status = "verified" if located and located[0].location == cite.location else "pending"
+
     for group in (*COLLECTIONS, "relations", "modeling_intents"):
         for fact in getattr(semantic, group):
             flow_evidence = [cite for flow in getattr(fact, "information_flows", []) for cite in flow.evidence]
-            for cite in [*fact.evidence, *getattr(fact, "equipment_evidence", []), *fact.review_evidence, *flow_evidence]:
-                located = locate(docs, cite.quote, cite.extraction_batch,
-                                 document_id=cite.document_id, fragment_id=cite.fragment_id)
-                cite.status = "verified" if located and located[0].location == cite.location else "pending"
+            verify([*fact.evidence, *getattr(fact, "equipment_evidence", []), *fact.review_evidence, *flow_evidence])
+    if semantic.modeling_task:
+        verify(semantic.modeling_task.review_evidence)
     preserved = [issue for issue in semantic.validation.issues if issue.code in {
         "field_conflict", "identity_conflict", "candidate_shape", "candidate_schema", "file_parse_error",
-        "empty_extraction", "revision_pending", "revision_target_unresolved", "evidence_not_located", "measurement_unparsed",
+        "empty_extraction", "revision_pending", "revision_review_required", "revision_target_unresolved",
+        "evidence_not_located", "measurement_unparsed",
     }]
     preserved.extend(issue for issue in semantic.validation.issues if issue.code.startswith("batch_"))
     result = validate_model(semantic, preserved)
-    result.validation.issues.extend(build_process_graph(result).issues)
-    if result.validation.status == "verified" and result.validation.issues:
-        result.validation.status = "pending"
+    summarize_validation(result, [*result.validation.issues, *build_process_graph(result).issues])
     return result.validation
 
 

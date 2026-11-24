@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Dropdown, Empty, Select } from "antd";
-import { ArrowDownToLine, Braces, CircleAlert, Copy, Ellipsis, Expand, FlaskConical, GitBranch, Layers3, LayoutGrid, Sheet, Terminal } from "lucide-react";
+import { ArrowDownToLine, Braces, CircleAlert, Copy, Ellipsis, Expand, FlaskConical, GitBranch, Layers3, LayoutGrid, PackageCheck, Sheet, Terminal } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
   ChatMessage, OutputTemplate, ReviewState,
-  SemanticModel, SemanticVersion, TemplatePreviewResponse, PipelineStage, ProcessGraph, ReviewRequest,
+  SemanticModel, SemanticVersion, TemplatePreviewResponse, PipelineStage, ProcessGraph, ReviewRequest, ContractKind, Evidence,
 } from "../types";
 import { semanticFrom } from "../types";
+import { api } from "../api/client";
 import { HtmlPreview } from "./HtmlPreview";
 import { ProcessTopology } from "./ProcessTopology";
 import { entitiesInGroup, entityTitle, relationTitle, semanticEntities } from "./semanticPresentation";
@@ -16,6 +17,8 @@ import { SemanticWorkspace } from "./SemanticWorkspace";
 import type { EntityGroup } from "./SemanticWorkspace";
 import { OntologyBrowser, ReviewDialog, RunProgress, toolNames } from "./RequirementTools";
 import type { Point } from "./useTopologyViewport";
+import { ContractBrowser } from "./ContractBrowser";
+import { constraintValue, HandoffWorkspace, TaskSummary } from "./HandoffWorkspace";
 
 const tabs = [
   { id: "overview", name: "概览", icon: LayoutGrid },
@@ -23,6 +26,7 @@ const tabs = [
   { id: "semantics", name: "语义模型", icon: Layers3 },
   { id: "json", name: "结构化数据", icon: Braces },
   { id: "issues", name: "校验问题", icon: CircleAlert },
+  { id: "handoff", name: "下游交接", icon: PackageCheck },
 ] as const;
 const secondaryViews = [
   { id: "preview", name: "模板预览", icon: Sheet },
@@ -40,6 +44,7 @@ const stageLabels: Record<string, string> = {
 };
 
 interface RightPanelProps {
+  sessionId: string | null;
   templates: OutputTemplate[];
   activeTemplateId: string | null;
   onSelectTemplate: (id: string) => void;
@@ -55,9 +60,8 @@ interface RightPanelProps {
   onRevise: (id: string) => void;
   onVerify: (id: string) => Promise<SemanticModel["validation"]>;
   onProject: () => void;
-  onOpenSource: (id: string) => void;
+  onOpenSource: (id: string, cite?: Evidence) => void;
   onReview: (id: string, payload: ReviewRequest) => Promise<void>;
-  onGraph: (id: string) => Promise<ProcessGraph>;
   progress: PipelineStage[];
   isRunning: boolean;
 }
@@ -69,13 +73,6 @@ function saveJson(value: unknown, filename: string) {
   link.download = filename;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-function constraintValue(item: SemanticModel["constraints"][number]) {
-  const bounds = item.comparator === "range" ? [item.lower, item.upper].join("–") : item.value;
-  if (bounds == null) return item.description ?? item.name;
-  const sign = item.comparator === "range" ? null : item.comparator?.replace("<=", "≤").replace(">=", "≥");
-  return [sign, bounds, item.unit, item.basis ? `/ ${item.basis}` : null].filter((part) => part != null).join(" ");
 }
 
 function CopyButton({ value }: { value: string }) {
@@ -116,7 +113,10 @@ function DebugView({ message }: { message: ChatMessage | null }) {
             attempt.usage?.prompt_tokens != null && `输入 ${attempt.usage.prompt_tokens.toLocaleString()}`,
             attempt.usage?.completion_tokens != null && `输出 ${attempt.usage.completion_tokens.toLocaleString()}`,
             attempt.usage?.reasoning_tokens != null && `推理 ${attempt.usage.reasoning_tokens.toLocaleString()}`,
-            attempt.thinking === "disabled" && "思考已关闭",
+            attempt.thinking === "disabled" && `已请求关闭思考${attempt.thinking_parameter ? `（${attempt.thinking_parameter}）` : ""}`,
+            attempt.thinking_result === "reasoning_returned" && "服务仍报告推理",
+            attempt.thinking_result === "unverified" && "服务未报告推理用量",
+            attempt.thinking_result === "rejected" && "关闭思考参数被拒绝",
             attempt.finish_reason && `结束原因 ${attempt.finish_reason}`,
             !attempt.finish_reason && attempt.error_code,
             attempt.request_count != null && `${attempt.request_count} 次请求`,
@@ -203,11 +203,15 @@ const batchReasons: Record<string, string> = {
   review_required: "需要先明确修订对象",
   request_budget_exhausted: "本轮模型请求预算已用完，本批尚未执行",
   output_truncated: "本批模型输出达到长度限制",
+  reasoning_budget_exhausted: "推理耗尽本批输出额度，未生成 JSON",
+  thinking_parameter_rejected: "模型服务拒绝了关闭思考参数",
   semantic_evidence_pending: "部分候选缺少可核验的原文依据",
   service_unavailable: "模型服务暂不可用",
 };
 const batchTips: Record<string, string> = {
   output_truncated: "检查实际发送的单批输出上限。调整后可继续解析未完成批次。",
+  reasoning_budget_exhausted: "在智能体设置中探测关闭思考参数，或提高单批输出上限后继续解析。",
+  thinking_parameter_rejected: "使用 JSON 探测核对网关支持的参数，保存后继续解析。",
   request_budget_exhausted: "增加单次运行请求预算，然后继续解析未完成批次。",
 };
 
@@ -252,11 +256,14 @@ function IssuesView({ model, issues, onLocate, onSource }: {
 export function RightPanel(props: RightPanelProps) {
   const model = useMemo(() => semanticFrom(props.extractedJson), [props.extractedJson]);
   const [ontologyOpen, setOntologyOpen] = useState(false);
+  const [schemaKind, setSchemaKind] = useState<ContractKind | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [group, setGroup] = useState<EntityGroup>("all");
   const [locatePath, setLocatePath] = useState<string | null>(null);
   const [topologySelection, setTopologySelection] = useState<string | null>(null);
   const [topologyPositions, setTopologyPositions] = useState(() => new Map<string, ReadonlyMap<string, Point>>());
+  const [historicalGraph, setHistoricalGraph] = useState<{ version: string; graph: ProcessGraph }>();
+  const [graphError, setGraphError] = useState("");
   const [edit, setEdit] = useState(false);
   const [draft, setDraft] = useState("");
   const [diagnostic, setDiagnostic] = useState("");
@@ -266,6 +273,17 @@ export function RightPanel(props: RightPanelProps) {
   useEffect(() => {
     setLocatePath(null); setTopologySelection(null); setEdit(false); setDiagnostic(""); setVerification(null);
   }, [model?.run_id, props.extractedJson]);
+  useEffect(() => {
+    if (props.tab !== "topology" || !props.sessionId || !model || model.process_graph) return;
+    const request = new AbortController();
+    setGraphError("");
+    api.getProcessGraph(props.sessionId, model.run_id, request.signal)
+      .then((graph) => setHistoricalGraph({ version: model.run_id, graph }))
+      .catch((reason: unknown) => { if (!request.signal.aborted) setGraphError(String(reason)); });
+    return () => request.abort();
+  }, [model, props.tab, props.sessionId]);
+  const topologyModel = useMemo(() => model?.process_graph ? model : model && historicalGraph?.version === model.run_id
+    ? { ...model, process_graph: historicalGraph.graph } : null, [model, historicalGraph]);
   const selected = model?.operations.find((entity) => entity.id === topologySelection);
   const showVersion = !!props.versions.length;
   const canProject = !model && Boolean(props.debugMessage?.extracted_json);
@@ -289,9 +307,11 @@ export function RightPanel(props: RightPanelProps) {
         options={[{ value: "active", label: "当前结果" }, ...props.versions.map((version) => ({
           value: version.id, label: `${new Date(version.created_at).toLocaleString("zh-CN")} · ${version.id.slice(0, 6)}`,
         }))]} />}
-      <Dropdown trigger={["click"]} menu={{ items: secondaryViews.map(({ id, name, icon: Icon }) => ({
+      <Dropdown trigger={["click"]} menu={{ items: [...secondaryViews.map(({ id, name, icon: Icon }) => ({
         key: id, label: name, icon: <Icon size={15} />,
-      })), selectedKeys: primaryTab ? [] : [props.tab], onClick: ({ key }) => props.onTab(key as ResultTab) }}>
+      })), { key: "schemas", label: "数据契约", icon: <Braces size={15} /> }],
+      selectedKeys: primaryTab ? [] : [props.tab],
+      onClick: ({ key }) => key === "schemas" ? setSchemaKind("formal") : props.onTab(key as ResultTab) }}>
         <Button size="small" type="text" aria-label="更多结果视图" id="result-more" icon={<Ellipsis size={19} />} />
       </Dropdown></div>
     </header>
@@ -311,6 +331,7 @@ export function RightPanel(props: RightPanelProps) {
       {props.tab === "overview" && (model ? <div className="result-stack">
         <div className="result-heading"><div><h3>制造需求概览</h3>
           <p>Schema {model.schema_version} · 本体 {model.ontology_version} · 词表 {model.vocabulary_version}</p></div>
+          <Button size="small" onClick={() => setSchemaKind("formal")}>数据契约</Button>
         </div>
         {extraction && <div className="result-coverage"><ReviewPill state={extraction} /><span>{model.source_refs.length} 项来源</span></div>}
         {(quantifiedComponents.length > 0 || lineLimits.length > 0) && <section className="requirement-summary">
@@ -321,6 +342,7 @@ export function RightPanel(props: RightPanelProps) {
           {lineLimits.map((item) => <button type="button" key={item.id} onClick={() => locate(item.id)}>
             <span>整线 · {item.name}</span><strong>{constraintValue(item)}</strong><ReviewPill state={item.status} /></button>)}
         </section>}
+        <TaskSummary model={model} task={model.modeling_task} onLocate={locate} onSource={props.onOpenSource} />
         {!!model.modeling_intents?.length && <section className="intent-list"><h4>建模目标</h4>
           <ul>{model.modeling_intents.map((item) => <li key={item.id}><button type="button" className="text-action" onClick={() => locate(item.id)}>{item.description}</button></li>)}</ul>
         </section>}
@@ -345,40 +367,50 @@ export function RightPanel(props: RightPanelProps) {
         description={props.isRunning ? "正在生成解析结果" : props.extractedJson ? "当前会话包含旧版抽取结果"
           : extraction === "failed" ? "最近一次解析失败，请查看该轮对话" : "等待工艺解析结果"} />
         {canProject && <Button onClick={props.onProject}>从历史抽取生成语义版本</Button>}</div>)}
-      {props.tab === "topology" && (model ? <div className="topology-stack">
+      {props.tab === "topology" && (topologyModel ? <div className="topology-stack">
         <div className="result-heading"><div><h3>工艺拓扑</h3><p>查看直接转序、前置依赖与条件关系</p></div>
-          <Button size="small" icon={<ArrowDownToLine size={15} />} onClick={async () => {
-            try { saveJson(model.process_graph ?? await props.onGraph(model.run_id), `process-graph-${model.run_id}.json`); }
-            catch (err) { setDiagnostic(String(err)); }
-          }}>导出图 JSON</Button></div>
-        {diagnostic && <Alert type="error" title={diagnostic} />}
-        <ProcessTopology key={model.run_id} model={model} selected={topologySelection} onSelect={setTopologySelection}
-          positions={topologyPositions.get(model.run_id) ?? emptyTopologyPositions}
+          <Button size="small" icon={<ArrowDownToLine size={15} />} onClick={() =>
+            saveJson(topologyModel.process_graph, `process-graph-${topologyModel.run_id}.json`)}>导出图 JSON</Button></div>
+        <ProcessTopology key={topologyModel.run_id} model={topologyModel} selected={topologySelection} onSelect={setTopologySelection}
+          positions={topologyPositions.get(topologyModel.run_id) ?? emptyTopologyPositions}
           onResetLayout={() => setTopologyPositions((previous) => {
             const updated = new Map(previous);
-            updated.delete(model.run_id);
+            updated.delete(topologyModel.run_id);
             return updated;
           })}
           onMove={(id, point) => setTopologyPositions((previous) => {
             const updated = new Map(previous);
-            const positions = new Map(previous.get(model.run_id));
+            const positions = new Map(previous.get(topologyModel.run_id));
             positions.set(id, point);
-            updated.set(model.run_id, positions);
+            updated.set(topologyModel.run_id, positions);
             return updated;
           })}
-          renderDetail={selected ? (close) => <EntityDetail key={selected.id} model={model} selected={selected}
-            onSelect={setTopologySelection} onSource={props.onOpenSource} onClose={close} /> : undefined} />
-      </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有语义版本可用于绘制拓扑" />)}
+          renderDetail={selected ? (close) => <EntityDetail key={selected.id} model={topologyModel} selected={selected}
+            onSelect={(id) => topologyModel.operations.some((op) => op.id === id) ? setTopologySelection(id) : locate(id)}
+            onSource={props.onOpenSource} onClose={close} /> : undefined} />
+      </div> : graphError ? <Alert type="error" title="读取工艺拓扑失败" description={graphError} />
+        : model ? <p role="status" className="muted">正在读取历史版本的拓扑…</p>
+          : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有语义版本可用于绘制拓扑" />)}
       {props.tab === "semantics" && (model ? <SemanticWorkspace key={model.run_id} model={model}
         group={group} onGroup={setGroup} issues={issues} locatePath={locatePath} onLocated={() => setLocatePath(null)}
         onOntology={() => setOntologyOpen(true)} onSource={props.onOpenSource} />
         : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有统一语义模型" />)}
       {props.tab === "issues" && <IssuesView key={model?.run_id} model={model} issues={issues} onLocate={locate} onSource={props.onOpenSource} />}
+      {props.tab === "handoff" && (model && props.sessionId ?
+        <HandoffWorkspace key={`${props.sessionId}/${model.run_id}`} sessionId={props.sessionId} model={model}
+          onLocate={locate} onSource={props.onOpenSource} onTopology={() => props.onTab("topology")} onSchema={() => setSchemaKind("handoff")} />
+        : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="生成正式语义版本后查看下游标准输入" />)}
       {props.tab === "json" && (props.extractedJson ? <div className="result-stack">
         <div className="result-heading"><div><h3>结构化数据</h3><p>{model ? `内容摘要 ${model.content_digest.slice(0, 16)}` : "旧版抽取 JSON"}</p></div>
           <div className="result-actions"><CopyButton value={json} />
           <Button size="small" icon={<ArrowDownToLine size={15} />}
-            onClick={() => saveJson(model ?? props.extractedJson, model ? `requirement-${model.run_id}.json` : "requirement.json")}>JSON</Button>
+            onClick={() => {
+              if (model && props.sessionId) {
+                const link = document.createElement("a");
+                link.href = api.exportSemanticVersionUrl(props.sessionId, model.run_id);
+                link.click();
+              } else saveJson(props.extractedJson, "requirement.json");
+            }}>JSON</Button>
           {!model && <Button size="small" onClick={() => { setDraft(json); setEdit((value) => !value); }}>编辑</Button>}</div>
         </div>
         {edit ? <><textarea aria-label="编辑抽取 JSON" className="json-code json-editor" value={draft} onChange={(event) => setDraft(event.target.value)} />
@@ -401,6 +433,7 @@ export function RightPanel(props: RightPanelProps) {
       </div>}
       {props.tab === "debug" && (props.isRunning ? <RunProgress steps={props.progress} /> : <DebugView message={props.debugMessage} />)}
       {ontologyOpen && <OntologyBrowser version={model?.ontology_version} onClose={() => setOntologyOpen(false)} />}
+      {schemaKind && <ContractBrowser initialKind={schemaKind} onClose={() => setSchemaKind(null)} />}
       {reviewOpen && model && <ReviewDialog model={model} onClose={() => setReviewOpen(false)}
         onSubmit={(payload) => props.onReview(model.run_id, payload)} />}
     </div>

@@ -168,7 +168,8 @@ def capability_terms(phrase: str) -> list[str]:
         for hit in re.finditer(pattern, phrase):
             before, after = phrase[:hit.start()], phrase[hit.end():]
             if (re.search(r"(?:待|已|避免|不得|禁止|无需|不需要)$", before)
-                    or re.match(r"后|前|组件|产物", after)):
+                    or re.match(r"后|前|组件|产物", after)
+                    or (hit.group() == "定位" and after.startswith("置"))):
                 continue
             indexes = set(range(*hit.span()))
             if not indexes & occupied:

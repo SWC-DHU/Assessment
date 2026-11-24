@@ -34,11 +34,14 @@ import {
 import { api } from "../api/client";
 import type {
   AgentConnectionTestResponse,
+  AgentJsonProbeResponse,
   AgentProfile,
   AgentProfilePayload,
   EnvStatus,
   ExtractionSchemaConfig,
   SchemaFieldDef,
+  SemanticThinking,
+  ThinkingParameter,
 } from "../types";
 
 const { Text } = Typography;
@@ -57,7 +60,10 @@ interface AgentManagerModalProps {
   onConnectionTested?: (agentId: string, result: AgentConnectionTestResponse) => void;
 }
 
-const defaults = { timeout_seconds: null, request_budget: null, batch_max_tokens: null, llm_disambiguation: true };
+const defaults: AgentProfile["execution"] = {
+  timeout_seconds: null, request_budget: null, batch_max_tokens: null,
+  semantic_thinking: null, thinking_parameter: "thinking", llm_disambiguation: true,
+};
 
 const PROVIDER_PRESETS = [
   { label: "OpenAI", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini" },
@@ -317,6 +323,8 @@ export function AgentManagerModal({
   const [testingConn, setTestingConn] = useState(false);
   const [fetchingModels, setFetchingModels] = useState(false);
   const [testResult, setTestResult] = useState<AgentConnectionTestResponse | null>(null);
+  const [probingJson, setProbingJson] = useState(false);
+  const [jsonProbe, setJsonProbe] = useState<{ key: symbol; result?: AgentJsonProbeResponse; error?: string }>();
   const [availableModels, setAvailableModels] = useState<string[]>([]);
 
   const wasOpenRef = useRef(false);
@@ -673,6 +681,30 @@ export function AgentManagerModal({
   const defaultRequestBudget = officialDeepSeek ? envStatus?.deepseek_semantic_request_budget ?? 4
     : envStatus?.semantic_request_budget ?? 2;
   const batchLimit = form?.execution?.batch_max_tokens ?? defaultBatchLimit;
+  const thinking = form?.execution?.semantic_thinking ?? (officialDeepSeek ? "disabled" : "service_default");
+  const probeKey = useMemo(() => Symbol(), [selectedId, form?.base_url, form?.model, form?.execution, form?.max_tokens, apiKeyInput, clearApiKey]);
+  const visibleProbe = jsonProbe?.key === probeKey ? jsonProbe : undefined;
+  const handleJsonProbe = async () => {
+    if (!form || !selectedId) return;
+    if (!isValidBaseUrl(form.base_url)) {
+      setJsonProbe({ key: probeKey, error: "请填写有效的 Base URL。" });
+      return;
+    }
+    setProbingJson(true);
+    setJsonProbe(undefined);
+    try {
+      const result = await api.probeAgentJson({
+        agent_id: selectedId, base_url: form.base_url.trim(), model: form.model.trim(),
+        api_key: apiKeyInput.trim() || undefined, clear_api_key: clearApiKey,
+        max_tokens: form.max_tokens, execution: form.execution ?? defaults,
+      });
+      setJsonProbe({ key: probeKey, result });
+    } catch (err) {
+      setJsonProbe({ key: probeKey, error: err instanceof Error ? err.message : "JSON 探测失败" });
+    } finally {
+      setProbingJson(false);
+    }
+  };
 
   return (
     <Modal
@@ -1082,6 +1114,20 @@ export function AgentManagerModal({
                         ...form, execution: { ...defaults, ...form.execution, batch_max_tokens: value },
                       })} />
                   </label>
+                  <label className="flex flex-col gap-1">事实抽取思考模式
+                    <Select<SemanticThinking> aria-label="事实抽取思考模式" value={thinking}
+                      options={[{ value: "service_default", label: "按服务默认" }, { value: "disabled", label: "关闭思考" }]}
+                      onChange={(value) => setForm({
+                        ...form, execution: { ...defaults, ...form.execution, semantic_thinking: value },
+                      })} />
+                  </label>
+                  {thinking === "disabled" && <label className="flex flex-col gap-1">关闭思考参数
+                    <Select<ThinkingParameter> aria-label="关闭思考参数" value={form.execution?.thinking_parameter ?? "thinking"}
+                      options={[{ value: "thinking", label: "thinking.type = disabled" }, { value: "reasoning_effort", label: "reasoning_effort = none" }]}
+                      onChange={(value) => setForm({
+                        ...form, execution: { ...defaults, ...form.execution, thinking_parameter: value },
+                      })} />
+                  </label>}
                   <div className="flex flex-col gap-2">
                     <span>词表候选消歧</span>
                     <Switch aria-label="允许模型辅助消歧" size="small" checked={(form.execution ?? defaults).llm_disambiguation}
@@ -1089,7 +1135,18 @@ export function AgentManagerModal({
                   </div>
                 </div>
                 <p className="muted">分批抽取、格式降级、局部修复和消歧共享请求预算。当前领域 Schema、本体和词表版本可在结果概览查看。</p>
-                {officialDeepSeek && <p className="muted">DeepSeek 官方接口的语义事实抽取使用非思考模式。</p>}
+                <Button size="small" loading={probingJson} onClick={handleJsonProbe}>探测 JSON 抽取</Button>
+                {visibleProbe?.error && <Alert type="error" showIcon title={visibleProbe.error} />}
+                {visibleProbe?.result && <Alert showIcon
+                  type={!visibleProbe.result.ok ? "error" : ["reasoning_returned", "unverified"].includes(visibleProbe.result.thinking_result ?? "")
+                    ? "warning" : "success"}
+                  title={visibleProbe.result.message}
+                  description={[
+                    `发送上限 ${visibleProbe.result.max_tokens.toLocaleString()}`,
+                    visibleProbe.result.finish_reason && `结束原因 ${visibleProbe.result.finish_reason}`,
+                    visibleProbe.result.usage.completion_tokens != null && `输出 ${visibleProbe.result.usage.completion_tokens}`,
+                    visibleProbe.result.usage.reasoning_tokens != null && `推理 ${visibleProbe.result.usage.reasoning_tokens}`,
+                  ].filter(Boolean).join(" · ")} />}
               </Card>
 
               {/* System Prompt & Rules */}

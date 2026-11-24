@@ -9,6 +9,7 @@ export const statusLabels: Record<string, string> = {
   verified: "语义校验通过", pending: "待确认", conflict: "来源冲突", invalid: "校验不通过",
   confirmed: "人工确认", complete: "解析完成", failed: "解析失败", located: "来源已定位",
   unprocessed: "未处理", success: "完成", skipped: "未执行", error: "失败", partial: "部分完成",
+  ready: "可交接", ready_with_warnings: "带警告可交接", blocked: "交接阻塞",
 };
 
 export function ReviewPill({ state }: { state: string }) {
@@ -24,7 +25,7 @@ export function evidenceLocation(cite: Evidence) {
 }
 
 export function Citations({ model, items, onSource }: {
-  model: SemanticModel; items: Evidence[]; onSource: (id: string) => void;
+  model: SemanticModel; items: Evidence[]; onSource: (id: string, cite?: Evidence) => void;
 }) {
   if (!items.length) return <p className="muted">当前事实没有可核验的逐字引文。</p>;
   return <div className="citation-list">
@@ -33,8 +34,8 @@ export function Citations({ model, items, onSource }: {
       return <figure key={`${cite.document_id}-${cite.fragment_id}-${index}`}>
         <blockquote>{cite.quote}</blockquote>
         <figcaption>
-          {source?.kind === "file"
-            ? <button type="button" className="text-action" onClick={() => onSource(cite.document_id)}>{source.name}</button>
+          {source?.kind === "file" || source?.kind === "message"
+            ? <button type="button" className="text-action" onClick={() => onSource(cite.document_id, cite)}>{source.name}</button>
             : source?.name || cite.document_id}
           <span>{evidenceLocation(cite)}</span>
           <span>{{ structured: "表格提取", llm: "模型候选", rule: "规则提取", manual: "人工确认", legacy: "历史来源" }[cite.method ?? "legacy"]}</span>
@@ -109,9 +110,24 @@ export function EntityDetail({ model, selected, onSelect, onSource, onClose, onE
     ["数值", selected.value == null ? null : String(selected.value)],
     ["上下限", selected.lower != null || selected.upper != null ? `${selected.lower ?? "—"} – ${selected.upper ?? "—"}` : null],
     ["单位", selected.unit], ["计量基准", selected.basis], ["约束说明", selected.description],
+    ["约束强度", selected.strength && ({ mandatory: "强制", preferred: "偏好", unspecified: "未说明" }[selected.strength] ?? selected.strength)],
   ].filter(([, value]) => value != null && value !== "");
+  const references = [
+    ["制造能力", selected.capability_ids], ["工艺约束", selected.constraint_ids],
+    ["输入物料", selected.input_material_ids], ["输出物料", selected.output_material_ids], ["直接前驱", selected.predecessor_ids],
+  ] as const;
+  const issues = model.validation.issues.filter((issue) => issue.path === selected.id);
   const overview = <dl className="fact-grid">
     {fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+    {selected.concept === "Operation" && references.map(([label, ids]) => <div key={label}><dt>{label}</dt>
+      <dd>{ids?.length ? <ul className="handoff-facts">{ids.map((id) => {
+        const fact = lookup.get(id);
+        const label = [fact?.name, fact?.code].filter(Boolean).join(" · ");
+        return <li key={id}>{fact ? <button type="button" className="text-action" onClick={() => onSelect(id)}>{label}</button> : id}</li>;
+      })}</ul> : <span className="muted">{label === "直接前驱" && selected.precursor_declaration?.length === 0 ? "原文说明无前驱" : "未提供"}</span>}</dd>
+    </div>)}
+    {!!issues.length && <div><dt>校验问题</dt><dd>{issues.map((item) =>
+      <p key={item.code + item.message}>{item.message}</p>)}</dd></div>}
     {target && <div><dt>约束对象</dt><dd><button className="text-action" type="button" onClick={() => onSelect(target.id)}>{entityTitle(target)}</button></dd></div>}
     {baseMaterial && <div><dt>基础物料</dt><dd><button className="text-action" type="button" onClick={() => onSelect(baseMaterial.id)}>{entityTitle(baseMaterial)}</button></dd></div>}
     {!!selected.information_flows?.length && <div><dt>工序信息流</dt><dd>{selected.information_flows.map((flow) =>

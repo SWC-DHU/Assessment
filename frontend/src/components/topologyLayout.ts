@@ -5,19 +5,6 @@ export const topologyCard = { width: 166, height: 48 };
 const rowSpacing = 94;
 const columnSpacing = 200;
 
-const legacyKinds = new Map([
-  ["hasPredecessor", "declared_predecessor"], ["directlyPrecedes", "direct_transition"],
-  ["branchesTo", "branch"], ["mergesInto", "merge"], ["conditionallyPrecedes", "conditional"],
-  ["reworksTo", "rework"], ["optionalNext", "optional"], ["precedes", "precedence"], ["dependsOn", "dependency"],
-]);
-
-const operationCategories = new Map([
-  ["主线工序", "main"], ["主线", "main"], ["main", "main"],
-  ["汇合工序", "merge"], ["汇合", "merge"], ["merge", "merge"],
-  ["旁路工序", "bypass"], ["旁路", "bypass"], ["bypass", "bypass"],
-  ["可选工序", "optional"], ["可选", "optional"], ["optional", "optional"],
-]);
-
 export interface TopologyEdge {
   id: string;
   source: string;
@@ -25,15 +12,6 @@ export interface TopologyEdge {
   kind: string;
   status: SemanticRelation["status"];
   condition?: string | null;
-}
-
-function legacyEdge(relation: SemanticRelation): TopologyEdge[] {
-  const kind = legacyKinds.get(relation.type);
-  if (!kind) return [];
-  const reversed = kind === "declared_predecessor" || kind === "dependency";
-  return [{ id: relation.id, kind, status: relation.status, condition: relation.condition,
-    source: reversed ? relation.target_id : relation.source_id,
-    target: reversed ? relation.source_id : relation.target_id }];
 }
 
 function orderOperations(ids: string[], outgoing: Map<string, string[]>) {
@@ -88,9 +66,9 @@ export function layoutTopology(model: SemanticModel) {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const graphCategories = new Map(model.process_graph?.nodes.map(({ id, category }) => [id, category]));
   const categories = new Map(nodes.map((node) => [node.id,
-    graphCategories.get(node.id) ?? operationCategories.get(node.operation_type?.trim().toLowerCase() ?? "") ?? "unspecified"]));
+    graphCategories.get(node.id) ?? "unspecified"]));
   const ids = nodes.map(({ id }) => id);
-  const edges: TopologyEdge[] = (model.process_graph?.edges ?? model.relations.flatMap(legacyEdge))
+  const edges: TopologyEdge[] = (model.process_graph?.edges ?? [])
     .filter(({ source, target }) => categories.has(source) && categories.has(target));
   const outgoing = new Map(ids.map((id) => [id, [] as string[]]));
   edges.forEach(({ source, target, kind, status }) => {

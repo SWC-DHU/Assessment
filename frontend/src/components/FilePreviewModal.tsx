@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Alert, Button, Card, Modal, Segmented, Space, Table, Tabs, Tag, Typography } from "antd";
 import { Check, Copy, FileText, Table2 } from "lucide-react";
-import type { UploadedFile } from "../types";
+import type { Evidence, UploadedFile } from "../types";
+import { evidenceLocation } from "./SemanticDetails";
 
 const { Text } = Typography;
 
 interface FilePreviewModalProps {
   file: UploadedFile | null;
+  cite?: Evidence;
   onClose: () => void;
 }
 
@@ -17,9 +19,10 @@ interface SheetPreview {
   truncated_preview?: boolean;
 }
 
-export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
+export function FilePreviewModal({ file, cite, onClose }: FilePreviewModalProps) {
   const [viewMode, setViewMode] = useState<string>("structured");
   const [copied, setCopied] = useState(false);
+  const highlightedCell = useRef<HTMLDivElement>(null);
 
   const preview = file?.parsed_preview || {};
   const kind = String(preview.kind || "text");
@@ -46,14 +49,15 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
       title: sheet.rows[0]?.[cIdx]?.value || `Col ${cIdx + 1}`,
       dataIndex: `c_${cIdx}`,
       key: `c_${cIdx}`,
-      render: (cell: { coord: string; value: string } | undefined) => (
-        <div className="min-w-[85px]">
-          <div style={{ fontSize: 10, fontFamily: "monospace", color: "#1677ff" }}>
+      render: (cell: { coord: string; value: string } | undefined) => {
+        const active = Boolean(cite?.location.cell && cell?.coord === cite.location.cell && sheet.name === cite.location.sheet);
+        return <div className="min-w-[85px]" data-source-cell={active || undefined} ref={active ? highlightedCell : undefined}>
+          <div style={{ fontSize: 10, fontFamily: "monospace", color: "var(--accent)" }}>
             {sheet.name !== "CSV" ? `${sheet.name}!${cell?.coord || ""}` : cell?.coord || ""}
           </div>
           <div className="text-xs whitespace-pre-wrap">{cell?.value || "-"}</div>
-        </div>
-      ),
+        </div>;
+      },
     }));
 
     const dataSource = sheet.rows.map((row, rIdx) => {
@@ -83,6 +87,9 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
       footer={null}
       width={960}
       centered
+      afterOpenChange={(open) => {
+        if (open) highlightedCell.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }}
       destroyOnClose
       title={
         file ? (
@@ -146,6 +153,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
     >
       {file && (
         <div className="max-h-[68vh] overflow-auto pt-2">
+          {cite && <p className="source-location"><strong>{evidenceLocation(cite)}</strong> · {cite.quote}</p>}
           {file.parse_status === "error" ? (
             <Alert
               type="error"
@@ -164,6 +172,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
             sheets.length > 1 ? (
               <Tabs
                 size="small"
+                defaultActiveKey={cite?.location.sheet ?? undefined}
                 items={sheets.map((s) => ({
                   key: s.name,
                   label: `${s.name} (${s.total_rows}行)`,
