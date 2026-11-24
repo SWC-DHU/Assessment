@@ -74,3 +74,32 @@ Schema 2.1 的版本 JSON 增加工序信息流、定性约束的关联参数及
 | `operation_requirements` | 按 `operation_id` 读取已核验能力编码、直接工序约束、物料、状态、直接前驱和显式设备条件 |
 | `capabilities`、`constraints`、`products`、`materials`、`material_states`、`objectives` | 用原始稳定 ID 查询本载荷内的实例。能力级约束通过 `parameter_constraint_ids` 查找 |
 | `process_graph`、`relations`、`source_refs` | 读取转序、条件和返工，并用关系与引文回溯依据 |
+
+## 模型资产库接口（`/api/model-assets`）
+
+| 方法 | 路径 | 行为 |
+| --- | --- | --- |
+| GET | `/api/model-assets/schema` | 返回统一 `ModelAsset` 1.0.0 JSON Schema |
+| GET | `/api/model-assets/summary` | 返回资产总数、有效数、分类/能力/三维绑定统计及资产库版本摘要 |
+| GET | `/api/model-assets` | 按 `category`、`capability`、`material_type`、`binding_status`、`data_source`、`search` 筛选资产 |
+| GET | `/api/model-assets/{asset_id}` | 读取单个模型资产完整八模块定义及词表/完整度校验报告 |
+| PUT | `/api/model-assets/{asset_id}` | 创建或更新模型资产（经 Pydantic 与共享词表校验后持久化至 JSON） |
+| PATCH | `/api/model-assets/{asset_id}/binding` | 预留三维模型绑定入口，更新 `binding_status`、`model_uri`、`file_format` |
+| POST | `/api/model-assets/validate` | 仅校验单个或批量 JSON 资产定义，不写入资产库 |
+| POST | `/api/model-assets/import` | 批量校验并导入模型资产 JSON（支持 `overwrite` 开关） |
+| GET | `/api/model-assets/export` | 导出全量或指定 `asset_ids` 的模型资产 JSON |
+| DELETE | `/api/model-assets/{asset_id}` | 删除指定模型资产 |
+
+## 资源匹配智能体接口（`/api/resource-matching`）
+
+| 方法 | 路径 | 行为 |
+| --- | --- | --- |
+| GET | `/api/resource-matching/schema` | 返回下游输出契约 `ResourceMatchingOutput` 1.0.0 JSON Schema |
+| GET | `/api/resource-matching/tools` | 读取资源匹配智能体确定性工具目录 |
+| GET | `/api/resource-matching/mappings` | 读取共享本体中的六项需求↔资源语义对应规则 |
+| POST | `/api/resource-matching/sessions/{session_id}/versions/{version_id}/run` | 直接消费指定语义版本生成的 `ResourceMatchingInput`，执行匹配并可选持久化至 `resource_matching_runs` |
+| POST | `/api/resource-matching/run-direct` | 直接提交 `ResourceMatchingInput` JSON 执行无状态或持久化匹配（便于 Metatwin 独立集成） |
+| GET | `/api/resource-matching/runs` | 按 `session_id` / `semantic_version_id` 查询历史匹配记录 |
+| GET | `/api/resource-matching/runs/{run_id}` | 读取指定匹配运行的完整 `ResourceMatchingOutput` |
+| GET | `/api/resource-matching/runs/{run_id}/export` | 下载 `resource-matching-output-{run_id}.json` |
+| DELETE | `/api/resource-matching/runs/{run_id}` | 删除指定历史匹配记录 |

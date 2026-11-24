@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-FEED-05",
+    "name": "方形电芯通用上料定位机（技术参数待补全）",
+    "category": "feeding",
+    "subcategory": "待补全原型资产",
+    "description": "涵盖方形电芯供料、抓取与定位功能的早期数字孪生原型模型，尚未补充加工时间、状态转换及定位精度参数。",
+    "version": "1.0.0",
+    "tags": [
+      "方形电芯",
+      "上料",
+      "参数缺失",
+      "待确认"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "FEED",
+      "name": "供料",
+      "description": "电芯供料原型能力",
+      "qualitative_features": [
+        "material_compatibility"
+      ],
+      "is_primary": true
+    },
+    {
+      "code": "GRIP",
+      "name": "抓取",
+      "description": "电芯抓取原型能力",
+      "qualitative_features": [],
+      "is_primary": true
+    },
+    {
+      "code": "POSITION",
+      "name": "定位",
+      "description": "电芯定位原型能力",
+      "qualitative_features": [],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "prismatic_cell"
+    ],
+    "input_material_types": [],
+    "output_material_types": [],
+    "specifications": [],
+    "input_states": [],
+    "output_states": [],
+    "state_transitions": [],
+    "notes": "缺失状态转换与关键技术参数，用于验证待确认集合分流逻辑。"
+  },
+  "parameters": [],
+  "interfaces": [],
+  "geometry": null,
+  "behavior": null,
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-FEED-05",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": "缺失状态转换与关键技术参数，用于验证待确认集合分流逻辑。"
+  }
+}

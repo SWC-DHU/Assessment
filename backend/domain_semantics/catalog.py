@@ -14,6 +14,11 @@ ONTOLOGY_VERSION = "3.0.0"
 HISTORICAL_VERSIONS = ("1.0.0", "2.0.0")
 CORE_CONCEPTS = ("Product", "Material", "Operation", "CapabilityRequirement", "Constraint", "Objective")
 CORE_RELATIONS = ("hasComponent", "hasPredecessor", "consumes", "produces", "requiresCapability", "appliesTo")
+RESOURCE_CONCEPTS = ("ModelAsset", "ResourceCapability", "Interface")
+RESOURCE_RELATIONS = (
+    "providesCapability", "satisfiesCapability", "hasInterface",
+    "handlesMaterial", "supportsState", "addressesConstraint",
+)
 
 
 def ontology_concept(concept: str, version: str = ONTOLOGY_VERSION) -> str:
@@ -91,6 +96,9 @@ def ontology_metadata(version: str = ONTOLOGY_VERSION) -> dict:
         "available_versions": [*HISTORICAL_VERSIONS, ONTOLOGY_VERSION],
         "core_concepts": [concept for concept in CORE_CONCEPTS if M[concept] in classes],
         "core_relations": [relation for relation in CORE_RELATIONS if M[relation] in relations],
+        "resource_concepts": [concept for concept in RESOURCE_CONCEPTS if M[concept] in classes],
+        "resource_relations": [relation for relation in RESOURCE_RELATIONS if M[relation] in relations],
+        "demand_resource_mappings": vocabulary.get("demand_resource_mappings", []),
         "instance_concepts": {"Capability": ontology_concept("Capability", version)},
         "concepts": [term_id(node) for node in classes],
         "relations": [term_id(node) for node in relations],
@@ -108,8 +116,11 @@ def check_ontology() -> None:
     metadata = ontology_metadata()
     classes = set(metadata["concepts"])
     signatures = relation_signatures()
-    if (metadata["ontology_version"] != ONTOLOGY_VERSION or not set(CORE_CONCEPTS) <= classes
-            or set(signatures) != set(get_args(RelationKind))
+    expected_relations = set(get_args(RelationKind)) | set(RESOURCE_RELATIONS)
+    if (metadata["ontology_version"] != ONTOLOGY_VERSION
+            or not set(CORE_CONCEPTS) <= classes
+            or not set(RESOURCE_CONCEPTS) <= classes
+            or set(signatures) != expected_relations
             or any(not domain or not range_ or not (domain | range_) <= classes for domain, range_ in signatures.values())):
         raise RuntimeError("OWL 关系与语义 Schema 的端点契约不一致")
 
@@ -128,12 +139,64 @@ def query_ontology(term: str | None = None, version: str = ONTOLOGY_VERSION) -> 
     return {key: metadata[key] for key in ("ontology_version", "namespace")} | {"matches": matches}
 
 
+NORMALIZABLE_GROUPS = {
+    "concepts", "operations", "capabilities", "parameters",
+    "asset_categories", "material_types", "material_state_codes", "interface_types",
+}
+
+
 def normalize_term(group: str, text: str) -> dict:
-    if group not in {"concepts", "operations", "capabilities", "parameters"}:
+    if group not in NORMALIZABLE_GROUPS:
         raise ValueError("未知词表分类")
     matches = candidates(group, text)
     return {"original": text, "group": group, "candidates": matches,
             "term": matches[0] if len(matches) == 1 else None, "basis": "词表编码或别名" if len(matches) == 1 else None}
+
+
+def normalize_material_type(text: str | None) -> str | None:
+    """Resolve raw material name or alias into a canonical material_types code."""
+    if not text or not text.strip():
+        return None
+    exact = candidates("material_types", text)
+    if len(exact) == 1:
+        return exact[0]
+    cleaned = normalize(text)
+    vocab = load_vocabulary().get("material_types", {})
+    # Longest alias substring fallback for decorated material names (e.g. "清洗后方形电芯")
+    best: tuple[int, str] | None = None
+    for code, entry in vocab.items():
+        aliases = entry.get("aliases", []) if isinstance(entry, dict) else entry
+        for alias in [code, *aliases]:
+            norm_alias = normalize(alias)
+            if norm_alias and norm_alias in cleaned:
+                if best is None or len(norm_alias) > best[0]:
+                    best = (len(norm_alias), code)
+    return best[1] if best else None
+
+
+def normalize_material_state(text: str | None) -> str | None:
+    """Resolve raw material state phrase into a canonical material_state_codes code."""
+    if not text or not text.strip():
+        return None
+    exact = candidates("material_state_codes", text)
+    if len(exact) == 1:
+        return exact[0]
+    cleaned = normalize(text)
+    vocab = load_vocabulary().get("material_state_codes", {})
+    best: tuple[int, str] | None = None
+    for code, entry in vocab.items():
+        aliases = entry.get("aliases", []) if isinstance(entry, dict) else entry
+        for alias in [code, *aliases]:
+            norm_alias = normalize(alias)
+            if norm_alias and norm_alias in cleaned:
+                if best is None or len(norm_alias) > best[0]:
+                    best = (len(norm_alias), code)
+    return best[1] if best else None
+
+
+def semantic_mappings() -> list[dict]:
+    """Return explicit demand-side to resource-side semantic correspondence mappings."""
+    return list(load_vocabulary().get("demand_resource_mappings", []))
 
 
 def normalize(text: str) -> str:

@@ -1,0 +1,236 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-INS-01",
+    "name": "动力电池模组全自动EOL综合检测台",
+    "category": "inspection",
+    "subcategory": "模组EOL终检台",
+    "description": "面向激光加工后电池模组的全自动 EOL 终检设备，集成高精度电压、交流内阻及高压绝缘耐压测试，自动判定合格与不合格模组并输出检测报告。",
+    "version": "1.0.0",
+    "tags": [
+      "模组",
+      "EOL检测",
+      "电压",
+      "内阻",
+      "绝缘检测",
+      "合格判定"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "INSPECT",
+      "name": "检测",
+      "description": "模组电压、内阻、绝缘耐压综合终检与 OK/NG 自动判定",
+      "qualitative_features": [
+        "electrical_test",
+        "identification"
+      ],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "battery_module"
+    ],
+    "input_material_types": [],
+    "output_material_types": [],
+    "specifications": [],
+    "input_states": [
+      "laser_processed"
+    ],
+    "output_states": [
+      "qualified",
+      "unqualified"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "battery_module",
+        "from_state": "laser_processed",
+        "to_state": "qualified",
+        "condition": "电压/内阻/绝缘检测全部通过"
+      },
+      {
+        "material_type": "battery_module",
+        "from_state": "laser_processed",
+        "to_state": "unqualified",
+        "condition": "任一电气指标超差"
+      }
+    ],
+    "notes": null
+  },
+  "parameters": [
+    {
+      "parameter_code": "process_time",
+      "name": "EOL终检工时",
+      "value": 38.0,
+      "lower": 30.0,
+      "upper": 50.0,
+      "unit": "s",
+      "basis": "模组",
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "voltage",
+      "name": "绝缘耐压测试电压",
+      "value": 1500.0,
+      "lower": 500.0,
+      "upper": 3000.0,
+      "unit": "V",
+      "basis": null,
+      "capability_code": "INSPECT",
+      "note": null
+    },
+    {
+      "parameter_code": "resistance",
+      "name": "绝缘电阻检测量程",
+      "value": 1000.0,
+      "lower": 100.0,
+      "upper": 5000.0,
+      "unit": "MOhm",
+      "basis": null,
+      "capability_code": "INSPECT",
+      "note": null
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "mat_in",
+      "name": "进料物料接口",
+      "interface_type": "material_flow",
+      "direction": "input",
+      "compatible_conditions": [
+        "激光加工后模组"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mat_out",
+      "name": "出料物料接口",
+      "interface_type": "material_flow",
+      "direction": "output",
+      "compatible_conditions": [
+        "合格/不合格模组"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "ctrl_main",
+      "name": "产线控制接口",
+      "interface_type": "control",
+      "direction": "bidirectional",
+      "compatible_conditions": [
+        "PLC同步信号",
+        "安全联锁"
+      ],
+      "protocol": "OPC-UA",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "pwr_ac",
+      "name": "工业供电接口",
+      "interface_type": "electrical",
+      "direction": "input",
+      "compatible_conditions": [
+        "380V AC 3P"
+      ],
+      "protocol": "IEC-60309",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "info_mes",
+      "name": "MES信息流上报接口",
+      "interface_type": "information",
+      "direction": "output",
+      "compatible_conditions": [
+        "检测报告",
+        "检测结果",
+        "追溯信息"
+      ],
+      "protocol": "MES-REST/OPC-UA",
+      "payload_schema": "JSON traceability record",
+      "optional": false
+    }
+  ],
+  "geometry": {
+    "dimensions_mm": {
+      "length": 2600.0,
+      "width": 1700.0,
+      "height": 2150.0
+    },
+    "coordinate_system": "RHS_Z_UP_MM",
+    "mounting_datum": "bottom_center_floor",
+    "connection_points": [
+      {
+        "point_id": "pt_in",
+        "interface_id": "mat_in",
+        "position_mm": [
+          0.0,
+          850.0,
+          900.0
+        ],
+        "normal": [
+          -1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "point_id": "pt_out",
+        "interface_id": "mat_out",
+        "position_mm": [
+          2600.0,
+          850.0,
+          900.0
+        ],
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "completeness": "complete"
+  },
+  "behavior": {
+    "cycle_time_s": 38.0,
+    "cycle_time_basis": "模组",
+    "batch_size": 1,
+    "operating_states": [
+      "IDLE",
+      "RUNNING",
+      "FAULT",
+      "MAINTENANCE"
+    ],
+    "behavior_model_ref": null,
+    "behavior_model_type": "discrete_event",
+    "availability": 0.99
+  },
+  "model_binding": {
+    "model_uri": "geometry/MA-INS-01.glb",
+    "file_format": "glb",
+    "binding_status": "reserved",
+    "asset_ref_key": "MA-INS-01",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": null
+  }
+}

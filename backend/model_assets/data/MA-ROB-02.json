@@ -1,0 +1,223 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-ROB-02",
+    "name": "重载六轴电池模组下线搬运机器人",
+    "category": "robot",
+    "subcategory": "重载搬运机器人",
+    "description": "150kg 级重载六轴工业机器人，配伺服平衡抓具，用于将合格电池模组从产线工装板抓离移载至周转架，并触发空工装板回流。",
+    "version": "1.0.0",
+    "tags": [
+      "机器人",
+      "重载搬运",
+      "合格模组",
+      "下线",
+      "移载"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "TRANSPORT",
+      "name": "输送",
+      "description": "重载机器人抓取并移载合格模组至成品周转位",
+      "qualitative_features": [
+        "material_handling"
+      ],
+      "is_primary": true
+    },
+    {
+      "code": "GRIP",
+      "name": "抓取",
+      "description": "模组专用安全锁紧夹具抓取",
+      "qualitative_features": [
+        "material_handling",
+        "surface_condition"
+      ],
+      "is_primary": false
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "battery_module"
+    ],
+    "input_material_types": [],
+    "output_material_types": [],
+    "specifications": [],
+    "input_states": [
+      "qualified"
+    ],
+    "output_states": [
+      "ready_for_transfer"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "battery_module",
+        "from_state": "qualified",
+        "to_state": "ready_for_transfer",
+        "condition": null
+      }
+    ],
+    "notes": null
+  },
+  "parameters": [
+    {
+      "parameter_code": "process_time",
+      "name": "模组搬运下线工时",
+      "value": 28.0,
+      "lower": 22.0,
+      "upper": 36.0,
+      "unit": "s",
+      "basis": "模组",
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "payload",
+      "name": "额定负载",
+      "value": 150.0,
+      "lower": null,
+      "upper": null,
+      "unit": "kg",
+      "basis": null,
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "positioning_accuracy",
+      "name": "重复定位精度",
+      "value": 0.08,
+      "lower": null,
+      "upper": null,
+      "unit": "mm",
+      "basis": null,
+      "capability_code": null,
+      "note": null
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "mat_in",
+      "name": "进料物料接口",
+      "interface_type": "material_flow",
+      "direction": "input",
+      "compatible_conditions": [
+        "合格模组工装板位"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mat_out",
+      "name": "出料物料接口",
+      "interface_type": "material_flow",
+      "direction": "output",
+      "compatible_conditions": [
+        "成品模组周转区"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "ctrl_main",
+      "name": "产线控制接口",
+      "interface_type": "control",
+      "direction": "bidirectional",
+      "compatible_conditions": [
+        "PLC同步信号",
+        "安全联锁"
+      ],
+      "protocol": "OPC-UA",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "pwr_ac",
+      "name": "工业供电接口",
+      "interface_type": "electrical",
+      "direction": "input",
+      "compatible_conditions": [
+        "380V AC 3P"
+      ],
+      "protocol": "IEC-60309",
+      "payload_schema": null,
+      "optional": false
+    }
+  ],
+  "geometry": {
+    "dimensions_mm": {
+      "length": 2500.0,
+      "width": 2500.0,
+      "height": 2700.0
+    },
+    "coordinate_system": "RHS_Z_UP_MM",
+    "mounting_datum": "bottom_center_floor",
+    "connection_points": [
+      {
+        "point_id": "pt_in",
+        "interface_id": "mat_in",
+        "position_mm": [
+          0.0,
+          1250.0,
+          900.0
+        ],
+        "normal": [
+          -1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "point_id": "pt_out",
+        "interface_id": "mat_out",
+        "position_mm": [
+          2500.0,
+          1250.0,
+          900.0
+        ],
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "completeness": "complete"
+  },
+  "behavior": {
+    "cycle_time_s": 28.0,
+    "cycle_time_basis": "模组",
+    "batch_size": 1,
+    "operating_states": [
+      "IDLE",
+      "RUNNING",
+      "FAULT",
+      "MAINTENANCE"
+    ],
+    "behavior_model_ref": null,
+    "behavior_model_type": "discrete_event",
+    "availability": 0.98
+  },
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-ROB-02",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": null
+  }
+}

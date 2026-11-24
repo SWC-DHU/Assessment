@@ -1,0 +1,81 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-INS-04",
+    "name": "电池模组基础电压巡检仪（参数缺失/无绝缘检测）",
+    "category": "inspection",
+    "subcategory": "简易检测台",
+    "description": "基础型电池模组电压巡检台，缺少内阻/绝缘耐压测试参数和加工时间定义，需人工进一步确认适用性。",
+    "version": "1.0.0",
+    "tags": [
+      "模组",
+      "检测",
+      "参数缺失",
+      "待确认"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "INSPECT",
+      "name": "检测",
+      "description": "基础开路电压巡检",
+      "qualitative_features": [],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "battery_module"
+    ],
+    "input_material_types": [],
+    "output_material_types": [],
+    "specifications": [],
+    "input_states": [
+      "laser_processed"
+    ],
+    "output_states": [
+      "qualified",
+      "unqualified"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "battery_module",
+        "from_state": "laser_processed",
+        "to_state": "qualified",
+        "condition": null
+      },
+      {
+        "material_type": "battery_module",
+        "from_state": "laser_processed",
+        "to_state": "unqualified",
+        "condition": null
+      }
+    ],
+    "notes": "缺少电气测试参数与工时模型，用于测试待确认/信息不完整排序。"
+  },
+  "parameters": [],
+  "interfaces": [],
+  "geometry": null,
+  "behavior": null,
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-INS-04",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": "缺少电气测试参数与工时模型，用于测试待确认/信息不完整排序。"
+  }
+}

@@ -1,0 +1,179 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-ASM-09",
+    "name": "半自动低速模组钢带捆扎台",
+    "category": "assembly",
+    "subcategory": "低速捆扎站",
+    "description": "需人工辅助穿带的低速钢带固定台，单模组工时较长（150 s），用于验证工时约束冲突与低性能排序场景。",
+    "version": "1.0.0",
+    "tags": [
+      "模组",
+      "钢带",
+      "捆扎",
+      "低速",
+      "干扰资产"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "FASTEN",
+      "name": "固定",
+      "description": "低速半自动钢带收紧固定",
+      "qualitative_features": [
+        "assembly_alignment"
+      ],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "battery_module",
+      "steel_strap"
+    ],
+    "input_material_types": [
+      "battery_module",
+      "steel_strap"
+    ],
+    "output_material_types": [
+      "battery_module"
+    ],
+    "specifications": [],
+    "input_states": [
+      "busbar_mounted"
+    ],
+    "output_states": [
+      "strapped"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "battery_module",
+        "from_state": "busbar_mounted",
+        "to_state": "strapped",
+        "condition": null
+      }
+    ],
+    "notes": null
+  },
+  "parameters": [
+    {
+      "parameter_code": "process_time",
+      "name": "模组捆扎工时",
+      "value": 150.0,
+      "lower": null,
+      "upper": null,
+      "unit": "s",
+      "basis": "模组",
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "force",
+      "name": "锁紧力",
+      "value": 10.0,
+      "lower": null,
+      "upper": null,
+      "unit": "kN",
+      "basis": null,
+      "capability_code": "FASTEN",
+      "note": null
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "mat_in",
+      "name": "进料物料接口",
+      "interface_type": "material_flow",
+      "direction": "input",
+      "compatible_conditions": [
+        "装有跨接片的模组+钢带"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mat_out",
+      "name": "出料物料接口",
+      "interface_type": "material_flow",
+      "direction": "output",
+      "compatible_conditions": [
+        "捆扎后模组"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "ctrl_main",
+      "name": "产线控制接口",
+      "interface_type": "control",
+      "direction": "bidirectional",
+      "compatible_conditions": [
+        "PLC同步信号",
+        "安全联锁"
+      ],
+      "protocol": "OPC-UA",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "pwr_ac",
+      "name": "工业供电接口",
+      "interface_type": "electrical",
+      "direction": "input",
+      "compatible_conditions": [
+        "380V AC 3P"
+      ],
+      "protocol": "IEC-60309",
+      "payload_schema": null,
+      "optional": false
+    }
+  ],
+  "geometry": {
+    "dimensions_mm": {
+      "length": 2000.0,
+      "width": 1400.0,
+      "height": 1800.0
+    },
+    "coordinate_system": "RHS_Z_UP_MM",
+    "mounting_datum": "bottom_center_floor",
+    "connection_points": [],
+    "completeness": "partial"
+  },
+  "behavior": {
+    "cycle_time_s": 150.0,
+    "cycle_time_basis": "模组",
+    "batch_size": 1,
+    "operating_states": [
+      "IDLE",
+      "RUNNING",
+      "FAULT",
+      "MAINTENANCE"
+    ],
+    "behavior_model_ref": null,
+    "behavior_model_type": "discrete_event",
+    "availability": 0.9
+  },
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-ASM-09",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": null
+  }
+}

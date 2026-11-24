@@ -6,7 +6,7 @@ Assessment 是独立的制造需求解析实验工作台。浏览器使用 React
 
 ```mermaid
 flowchart LR
-    UI["会话、文件与版本工作区"] --> P["文档解析与来源适配"]
+    UI["需求解析 / 模型资产库 / 资源匹配工作台"] --> P["文档解析与来源适配"]
     P --> E["规则与分批候选抽取"]
     E --> D["本体映射、约束与拓扑"]
     D --> S["RequirementSemanticModel"]
@@ -14,9 +14,14 @@ flowchart LR
     V --> R["SQLite 语义版本"]
     R --> T["模板、语义图及 JSON"]
     R --> H["交接完整性检查"]
-    H --> I["ResourceMatchingInput"]
+    H --> I["ResourceMatchingInput 1.0.0"]
+    I --> RM["资源匹配智能体 (retrieval / constraints / ranking)"]
+    MA["模型资产库 (ModelAsset 1.0.0 · 59 Synthetic)"] --> RM
+    RM --> O["ResourceMatchingOutput 1.0.0"]
+    O --> MR["SQLite resource_matching_runs"]
+    O --> AM["后续关联建模智能体 (预留契约)"]
     T --> UI
-    I --> UI
+    O --> UI
 ```
 
 1. 上传服务把原始文件保存到 `uploads/<session_id>/`，并缓存解析预览和完整文本。文件重解析复用同一个入口。
@@ -28,7 +33,9 @@ flowchart LR
 
 ## 持久化与兼容
 
-- 启动通过 SQLAlchemy `create_all` 添加 `semantic_versions`、`template_revisions` 和 `agent_execution_settings`。旧表结构、历史消息和上传文件无需迁移。旧模板第一次编辑前会保存原定义为 v1。
+- 启动通过 SQLAlchemy `create_all` 添加 `semantic_versions`、`template_revisions`、`agent_execution_settings` 和 `resource_matching_runs`。旧表结构、历史消息和上传文件无需迁移。旧模板第一次编辑前会保存原定义为 v1。
+- 模型资产库（`backend/model_assets/`）采用 JSON 文件存储于 `data/`，与三维模型目录 `geometry/` 解耦，支持独立加载与迁移至 Metatwin。
+- 资源匹配智能体（`backend/resource_matching/`）直接消费 `ResourceMatchingInput` 1.0.0，不重复解析原始文档，生成 `ResourceMatchingOutput` 1.0.0 供前端查看及后续关联建模智能体消费。详述见 [资源匹配开发报告](RESOURCE_MATCHING_REPORT.md)。
 - 新运行将规范语义快照保存在版本表，并在现有会话 JSON 中附上展示投影，以兼容旧模板。旧结果继续支持自定义抽取 Schema、原 JSON 编辑及旧版 Mock。可显式转换为新版本。
 - 会话列表和来源校验读取 SQLite。删除原始文件后，既有版本保留当时的引用和状态，重新核验会报告来源不可用。
 - 会话分支记录父版本。定向修订只替换指定工序及参数的未人工确认约束。人工审核可确认任务范围及已有目标产品。重跑语义消息使用原父版本和来源集合。

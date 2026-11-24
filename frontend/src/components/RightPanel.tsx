@@ -62,6 +62,7 @@ interface RightPanelProps {
   onProject: () => void;
   onOpenSource: (id: string, cite?: Evidence) => void;
   onReview: (id: string, payload: ReviewRequest) => Promise<void>;
+  onStartMatching?: (sessionId: string, versionId: string) => void;
   progress: PipelineStage[];
   isRunning: boolean;
 }
@@ -398,7 +399,8 @@ export function RightPanel(props: RightPanelProps) {
       {props.tab === "issues" && <IssuesView key={model?.run_id} model={model} issues={issues} onLocate={locate} onSource={props.onOpenSource} />}
       {props.tab === "handoff" && (model && props.sessionId ?
         <HandoffWorkspace key={`${props.sessionId}/${model.run_id}`} sessionId={props.sessionId} model={model}
-          onLocate={locate} onSource={props.onOpenSource} onTopology={() => props.onTab("topology")} onSchema={() => setSchemaKind("handoff")} />
+          onLocate={locate} onSource={props.onOpenSource} onTopology={() => props.onTab("topology")} onSchema={() => setSchemaKind("handoff")}
+          onStartMatching={props.onStartMatching} />
         : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="生成正式语义版本后查看下游标准输入" />)}
       {props.tab === "json" && (props.extractedJson ? <div className="result-stack">
         <div className="result-heading"><div><h3>结构化数据</h3><p>{model ? `内容摘要 ${model.content_digest.slice(0, 16)}` : "旧版抽取 JSON"}</p></div>

@@ -1,0 +1,193 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-WLD-02",
+    "name": "五轴联动振镜激光加工工作站",
+    "category": "welding",
+    "subcategory": "五轴激光加工站",
+    "description": "五轴平台配合振镜扫描头的模组激光加工焊接站，可按预设轨迹完成跨接片激光焊接与焊后视觉复查。",
+    "version": "1.0.0",
+    "tags": [
+      "五轴",
+      "激光加工",
+      "激光焊接",
+      "模组",
+      "标准型"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "MACHINE",
+      "name": "加工",
+      "description": "五轴激光加工与连接片轨迹处理",
+      "qualitative_features": [
+        "weld_quality"
+      ],
+      "is_primary": true
+    },
+    {
+      "code": "WELD",
+      "name": "焊接",
+      "description": "模组连接片振镜激光焊接",
+      "qualitative_features": [
+        "weld_quality"
+      ],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "battery_module"
+    ],
+    "input_material_types": [],
+    "output_material_types": [],
+    "specifications": [],
+    "input_states": [
+      "strapped"
+    ],
+    "output_states": [
+      "laser_processed"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "battery_module",
+        "from_state": "strapped",
+        "to_state": "laser_processed",
+        "condition": null
+      }
+    ],
+    "notes": null
+  },
+  "parameters": [
+    {
+      "parameter_code": "process_time",
+      "name": "模组激光加工工时",
+      "value": 60.0,
+      "lower": null,
+      "upper": null,
+      "unit": "s",
+      "basis": "模组",
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "laser_power",
+      "name": "激光功率",
+      "value": 4.0,
+      "lower": null,
+      "upper": null,
+      "unit": "kW",
+      "basis": null,
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "positioning_accuracy",
+      "name": "定位精度",
+      "value": 0.04,
+      "lower": null,
+      "upper": null,
+      "unit": "mm",
+      "basis": null,
+      "capability_code": null,
+      "note": null
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "mat_in",
+      "name": "进料物料接口",
+      "interface_type": "material_flow",
+      "direction": "input",
+      "compatible_conditions": [
+        "捆扎后模组"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mat_out",
+      "name": "出料物料接口",
+      "interface_type": "material_flow",
+      "direction": "output",
+      "compatible_conditions": [
+        "激光加工后模组"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "ctrl_main",
+      "name": "产线控制接口",
+      "interface_type": "control",
+      "direction": "bidirectional",
+      "compatible_conditions": [
+        "PLC同步信号",
+        "安全联锁"
+      ],
+      "protocol": "OPC-UA",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "pwr_ac",
+      "name": "工业供电接口",
+      "interface_type": "electrical",
+      "direction": "input",
+      "compatible_conditions": [
+        "380V AC 3P"
+      ],
+      "protocol": "IEC-60309",
+      "payload_schema": null,
+      "optional": false
+    }
+  ],
+  "geometry": {
+    "dimensions_mm": {
+      "length": 3100.0,
+      "width": 2200.0,
+      "height": 2500.0
+    },
+    "coordinate_system": "RHS_Z_UP_MM",
+    "mounting_datum": "bottom_center_floor",
+    "connection_points": [],
+    "completeness": "partial"
+  },
+  "behavior": {
+    "cycle_time_s": 60.0,
+    "cycle_time_basis": "模组",
+    "batch_size": 1,
+    "operating_states": [
+      "IDLE",
+      "RUNNING",
+      "FAULT",
+      "MAINTENANCE"
+    ],
+    "behavior_model_ref": null,
+    "behavior_model_type": "discrete_event",
+    "availability": 0.96
+  },
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-WLD-02",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": null
+  }
+}

@@ -6,7 +6,9 @@ import type { ContractKind, ContractSchema } from "../types";
 const contracts = [
   { key: "candidates", label: "候选抽取", description: "分批提交给模型的候选事实和引文。服务端逐条校验并核对原始来源。" },
   { key: "formal", label: "正式语义", description: "后端实例化、校验并保存的可追溯需求版本。字段的实际值与来源可在语义模型中查看。" },
-  { key: "handoff", label: "资源匹配", description: "从指定正式版本生成的资源需求。工序引用使用同一份输出内的索引解析，以交接状态判断是否就绪。" },
+  { key: "handoff", label: "匹配输入", description: "从指定正式版本生成的资源匹配标准输入（ResourceMatchingInput）。" },
+  { key: "model_asset", label: "模型资产", description: "统一数字孪生模型资产定义（ModelAsset 1.0.0），含八大模块并与三维文件解耦。" },
+  { key: "matching_output", label: "匹配输出", description: "资源匹配智能体输出契约（ResourceMatchingOutput 1.0.0），交由下游关联建模智能体消费。" },
 ] as const;
 
 const fieldMeaning: Record<string, string> = {

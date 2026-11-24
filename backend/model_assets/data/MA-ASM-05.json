@@ -1,0 +1,210 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-ASM-05",
+    "name": "模组跨接片精密视觉插装工作站",
+    "category": "assembly",
+    "subcategory": "跨接片组装站",
+    "description": "具备跨接片型号视觉防错校验与高精度插装定位功能的自动化组装站，将跨接片准确装入模组主体连接位。",
+    "version": "1.0.0",
+    "tags": [
+      "模组主体",
+      "跨接片",
+      "模组",
+      "组装",
+      "视觉防错"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "ASSEMBLE",
+      "name": "装配",
+      "description": "跨接片型号识别、极柱对位与精密安装",
+      "qualitative_features": [
+        "material_compatibility",
+        "assembly_alignment"
+      ],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "module_body",
+      "busbar",
+      "battery_module"
+    ],
+    "input_material_types": [
+      "module_body",
+      "busbar"
+    ],
+    "output_material_types": [
+      "battery_module"
+    ],
+    "specifications": [],
+    "input_states": [
+      "assembled"
+    ],
+    "output_states": [
+      "busbar_mounted"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "battery_module",
+        "from_state": "assembled",
+        "to_state": "busbar_mounted",
+        "condition": null
+      }
+    ],
+    "notes": null
+  },
+  "parameters": [
+    {
+      "parameter_code": "process_time",
+      "name": "跨接片组装工时",
+      "value": 34.0,
+      "lower": 28.0,
+      "upper": 45.0,
+      "unit": "s",
+      "basis": "模组",
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "positioning_accuracy",
+      "name": "安装定位精度",
+      "value": 0.05,
+      "lower": null,
+      "upper": null,
+      "unit": "mm",
+      "basis": null,
+      "capability_code": "ASSEMBLE",
+      "note": null
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "mat_in",
+      "name": "进料物料接口",
+      "interface_type": "material_flow",
+      "direction": "input",
+      "compatible_conditions": [
+        "模组主体+跨接片料盘"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mat_out",
+      "name": "出料物料接口",
+      "interface_type": "material_flow",
+      "direction": "output",
+      "compatible_conditions": [
+        "装有跨接片的模组"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "ctrl_main",
+      "name": "产线控制接口",
+      "interface_type": "control",
+      "direction": "bidirectional",
+      "compatible_conditions": [
+        "PLC同步信号",
+        "安全联锁"
+      ],
+      "protocol": "OPC-UA",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "pwr_ac",
+      "name": "工业供电接口",
+      "interface_type": "electrical",
+      "direction": "input",
+      "compatible_conditions": [
+        "380V AC 3P"
+      ],
+      "protocol": "IEC-60309",
+      "payload_schema": null,
+      "optional": false
+    }
+  ],
+  "geometry": {
+    "dimensions_mm": {
+      "length": 2500.0,
+      "width": 1750.0,
+      "height": 2200.0
+    },
+    "coordinate_system": "RHS_Z_UP_MM",
+    "mounting_datum": "bottom_center_floor",
+    "connection_points": [
+      {
+        "point_id": "pt_in",
+        "interface_id": "mat_in",
+        "position_mm": [
+          0.0,
+          875.0,
+          900.0
+        ],
+        "normal": [
+          -1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "point_id": "pt_out",
+        "interface_id": "mat_out",
+        "position_mm": [
+          2500.0,
+          875.0,
+          900.0
+        ],
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "completeness": "complete"
+  },
+  "behavior": {
+    "cycle_time_s": 34.0,
+    "cycle_time_basis": "模组",
+    "batch_size": 1,
+    "operating_states": [
+      "IDLE",
+      "RUNNING",
+      "FAULT",
+      "MAINTENANCE"
+    ],
+    "behavior_model_ref": null,
+    "behavior_model_type": "discrete_event",
+    "availability": 0.98
+  },
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-ASM-05",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": null
+  }
+}

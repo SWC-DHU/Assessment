@@ -44,6 +44,7 @@ cd backend
 - [接口](docs/API.md)
 - [测试报告](docs/TEST_REPORT.md)
 - [迁移指南](docs/MIGRATION_GUIDE.md)
+- [资源匹配开发与实验报告](docs/RESOURCE_MATCHING_REPORT.md)
 
 
 ### v2 混合来源回归
@@ -53,8 +54,19 @@ cd backend
 .venv/bin/python -m experiments.run --methods c --offline --repeat 3   --gold experiments/battery_module_gold.json   --expected-overlay experiments/battery_mixed_expectations.json   --input '../test case/工艺需求文件.xlsx'   --text-file '../test case/自然语言建模需求.md'
 ```
 
+### 资源匹配对比实验（方法 A / B / C）
+
+```sh
+cd backend
+.venv/bin/python -m experiments.run_matching \
+  --gold experiments/battery_matching_gold.json \
+  --input '../test case/工艺需求文件.xlsx' \
+  --text-file '../test case/自然语言建模需求.md' \
+  --methods a,c --top-k 3 --repeat 3 --offline
+```
+
 - [v2 现状审查](docs/REFACTOR_AUDIT.md)
 - [v2 语义与调用链](docs/REFACTOR_V2.md)
 - [v2 测试与实验报告](docs/REFACTOR_REPORT.md)
 
-正式语义 Schema 2.2 支持带来源的建模任务。结果栏的“下游交接”提供按版本生成的资源匹配输入、诊断和 JSON 导出。开发决策、数据契约与回归记录见 [交接开发报告](docs/HANDOFF_REPORT.md)。
+正式语义 Schema 2.2 支持带来源的建模任务。结果栏的“下游交接”提供按版本生成的资源匹配输入、诊断、JSON 导出及直达「资源匹配」工作台入口；平台同时提供「模型资产库」（统一 `ModelAsset` 1.0.0 与 59 个 synthetic 虚拟资产）和「资源匹配智能体」（输出 `ResourceMatchingOutput` 1.0.0 供后续关联建模智能体消费）。开发与验证详述见 [交接开发报告](docs/HANDOFF_REPORT.md) 与 [资源匹配开发报告](docs/RESOURCE_MATCHING_REPORT.md)。

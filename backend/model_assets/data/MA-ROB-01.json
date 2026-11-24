@@ -1,0 +1,246 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-ROB-01",
+    "name": "六轴高速伺服抓取定位机器人单元",
+    "category": "robot",
+    "subcategory": "六轴工业机器人",
+    "description": "搭载力控柔性电爪与2.5D视觉引导的六轴机器人，提供 GRIP 与 POSITION 能力，可与独立供料站协同完成电芯或结构件抓取定位。",
+    "version": "1.0.0",
+    "tags": [
+      "机器人",
+      "抓取",
+      "定位",
+      "方形电芯",
+      "结构件",
+      "协同"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "GRIP",
+      "name": "抓取",
+      "description": "六轴机器人柔性力控抓取，避免损伤工件表面",
+      "qualitative_features": [
+        "surface_condition",
+        "material_compatibility"
+      ],
+      "is_primary": true
+    },
+    {
+      "code": "POSITION",
+      "name": "定位",
+      "description": "机器人视觉引导高精度定位放置",
+      "qualitative_features": [
+        "assembly_alignment"
+      ],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "prismatic_cell",
+      "thermal_shell",
+      "mid_plate",
+      "end_plate"
+    ],
+    "input_material_types": [],
+    "output_material_types": [],
+    "specifications": [],
+    "input_states": [
+      "incoming",
+      "supplied"
+    ],
+    "output_states": [
+      "positioned"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "prismatic_cell",
+        "from_state": "supplied",
+        "to_state": "positioned",
+        "condition": null
+      },
+      {
+        "material_type": "prismatic_cell",
+        "from_state": "incoming",
+        "to_state": "positioned",
+        "condition": null
+      }
+    ],
+    "notes": null
+  },
+  "parameters": [
+    {
+      "parameter_code": "process_time",
+      "name": "抓取定位工时",
+      "value": 5.5,
+      "lower": 4.5,
+      "upper": 7.5,
+      "unit": "s",
+      "basis": "电芯",
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "positioning_accuracy",
+      "name": "重复定位精度",
+      "value": 0.03,
+      "lower": null,
+      "upper": null,
+      "unit": "mm",
+      "basis": null,
+      "capability_code": "POSITION",
+      "note": null
+    },
+    {
+      "parameter_code": "payload",
+      "name": "额定负载",
+      "value": 12.0,
+      "lower": null,
+      "upper": null,
+      "unit": "kg",
+      "basis": null,
+      "capability_code": "GRIP",
+      "note": null
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "mat_in",
+      "name": "进料物料接口",
+      "interface_type": "material_flow",
+      "direction": "input",
+      "compatible_conditions": [
+        "供料取料位"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mat_out",
+      "name": "出料物料接口",
+      "interface_type": "material_flow",
+      "direction": "output",
+      "compatible_conditions": [
+        "已定位工位"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "ctrl_main",
+      "name": "产线控制接口",
+      "interface_type": "control",
+      "direction": "bidirectional",
+      "compatible_conditions": [
+        "PLC同步信号",
+        "安全联锁"
+      ],
+      "protocol": "OPC-UA",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "pwr_ac",
+      "name": "工业供电接口",
+      "interface_type": "electrical",
+      "direction": "input",
+      "compatible_conditions": [
+        "380V AC 3P"
+      ],
+      "protocol": "IEC-60309",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mech_flange",
+      "name": "末端执行器法兰",
+      "interface_type": "mechanical",
+      "direction": "output",
+      "compatible_conditions": [
+        "柔顺夹爪"
+      ],
+      "protocol": "ISO-9409-1-50-4-M6",
+      "payload_schema": null,
+      "optional": false
+    }
+  ],
+  "geometry": {
+    "dimensions_mm": {
+      "length": 1600.0,
+      "width": 1600.0,
+      "height": 2100.0
+    },
+    "coordinate_system": "RHS_Z_UP_MM",
+    "mounting_datum": "bottom_center_floor",
+    "connection_points": [
+      {
+        "point_id": "pt_in",
+        "interface_id": "mat_in",
+        "position_mm": [
+          0.0,
+          800.0,
+          900.0
+        ],
+        "normal": [
+          -1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "point_id": "pt_out",
+        "interface_id": "mat_out",
+        "position_mm": [
+          1600.0,
+          800.0,
+          900.0
+        ],
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "completeness": "complete"
+  },
+  "behavior": {
+    "cycle_time_s": 5.5,
+    "cycle_time_basis": "电芯",
+    "batch_size": 1,
+    "operating_states": [
+      "IDLE",
+      "RUNNING",
+      "FAULT",
+      "MAINTENANCE"
+    ],
+    "behavior_model_ref": null,
+    "behavior_model_type": "discrete_event",
+    "availability": 0.99
+  },
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-ROB-01",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": null
+  }
+}

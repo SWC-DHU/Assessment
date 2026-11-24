@@ -1,0 +1,191 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-FEED-04",
+    "name": "软包电芯自动上料定位工作站",
+    "category": "feeding",
+    "subcategory": "软包电芯上料",
+    "description": "面向铝塑膜软包电芯的轻载真空吸取、上料与极耳对齐定位工作站（不适配硬壳方形电芯）。",
+    "version": "1.0.0",
+    "tags": [
+      "软包电芯",
+      "上料",
+      "抓取",
+      "定位",
+      "干扰资产"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "FEED",
+      "name": "供料",
+      "description": "软包电芯料盒自动供料",
+      "qualitative_features": [
+        "material_compatibility"
+      ],
+      "is_primary": true
+    },
+    {
+      "code": "GRIP",
+      "name": "抓取",
+      "description": "柔顺真空吸盘抓取铝塑膜电芯",
+      "qualitative_features": [
+        "surface_condition"
+      ],
+      "is_primary": true
+    },
+    {
+      "code": "POSITION",
+      "name": "定位",
+      "description": "软包极耳轮廓视觉定位",
+      "qualitative_features": [
+        "assembly_alignment"
+      ],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "pouch_cell"
+    ],
+    "input_material_types": [],
+    "output_material_types": [],
+    "specifications": [],
+    "input_states": [
+      "incoming"
+    ],
+    "output_states": [
+      "positioned"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "pouch_cell",
+        "from_state": "incoming",
+        "to_state": "positioned",
+        "condition": null
+      }
+    ],
+    "notes": null
+  },
+  "parameters": [
+    {
+      "parameter_code": "process_time",
+      "name": "上料工时",
+      "value": 7.0,
+      "lower": null,
+      "upper": null,
+      "unit": "s",
+      "basis": "件",
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "positioning_accuracy",
+      "name": "定位精度",
+      "value": 0.08,
+      "lower": null,
+      "upper": null,
+      "unit": "mm",
+      "basis": null,
+      "capability_code": "POSITION",
+      "note": null
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "mat_in",
+      "name": "进料物料接口",
+      "interface_type": "material_flow",
+      "direction": "input",
+      "compatible_conditions": [
+        "软包电芯料盒"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mat_out",
+      "name": "出料物料接口",
+      "interface_type": "material_flow",
+      "direction": "output",
+      "compatible_conditions": [
+        "已定位软包电芯"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "ctrl_main",
+      "name": "产线控制接口",
+      "interface_type": "control",
+      "direction": "bidirectional",
+      "compatible_conditions": [
+        "PLC同步信号",
+        "安全联锁"
+      ],
+      "protocol": "OPC-UA",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "pwr_ac",
+      "name": "工业供电接口",
+      "interface_type": "electrical",
+      "direction": "input",
+      "compatible_conditions": [
+        "380V AC 3P"
+      ],
+      "protocol": "IEC-60309",
+      "payload_schema": null,
+      "optional": false
+    }
+  ],
+  "geometry": {
+    "dimensions_mm": {
+      "length": 2000.0,
+      "width": 1500.0,
+      "height": 1900.0
+    },
+    "coordinate_system": "RHS_Z_UP_MM",
+    "mounting_datum": "bottom_center_floor",
+    "connection_points": [],
+    "completeness": "partial"
+  },
+  "behavior": {
+    "cycle_time_s": 7.0,
+    "cycle_time_basis": "件",
+    "batch_size": 1,
+    "operating_states": [
+      "IDLE",
+      "RUNNING",
+      "FAULT",
+      "MAINTENANCE"
+    ],
+    "behavior_model_ref": null,
+    "behavior_model_type": "discrete_event",
+    "availability": 0.96
+  },
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-FEED-04",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": null
+  }
+}

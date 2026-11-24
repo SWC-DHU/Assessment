@@ -1,0 +1,238 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-ASM-01",
+    "name": "电芯-导热壳精密视觉定位装配工作站",
+    "category": "assembly",
+    "subcategory": "单体装配站",
+    "description": "将检测后电芯与预处理后导热壳进行视觉对位、方向防错与伺服压合装配，稳定产出电池单体组件。",
+    "version": "1.0.0",
+    "tags": [
+      "电芯",
+      "导热壳",
+      "单体组件",
+      "定位",
+      "装配"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "POSITION",
+      "name": "定位",
+      "description": "电芯与导热壳极性方向校验及双基准精确定位",
+      "qualitative_features": [
+        "assembly_alignment",
+        "identification"
+      ],
+      "is_primary": true
+    },
+    {
+      "code": "ASSEMBLE",
+      "name": "装配",
+      "description": "伺服压合机构将电芯装入导热壳形成单体组件",
+      "qualitative_features": [
+        "assembly_alignment",
+        "material_compatibility"
+      ],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "prismatic_cell",
+      "thermal_shell",
+      "cell_unit"
+    ],
+    "input_material_types": [
+      "prismatic_cell",
+      "thermal_shell"
+    ],
+    "output_material_types": [
+      "cell_unit"
+    ],
+    "specifications": [],
+    "input_states": [
+      "inspected",
+      "pretreated"
+    ],
+    "output_states": [
+      "assembled"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "prismatic_cell",
+        "from_state": "inspected",
+        "to_state": "assembled",
+        "condition": null
+      },
+      {
+        "material_type": "thermal_shell",
+        "from_state": "pretreated",
+        "to_state": "assembled",
+        "condition": null
+      }
+    ],
+    "notes": null
+  },
+  "parameters": [
+    {
+      "parameter_code": "process_time",
+      "name": "单体装配工时",
+      "value": 10.0,
+      "lower": 8.5,
+      "upper": 13.0,
+      "unit": "s",
+      "basis": "单体组件",
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "positioning_accuracy",
+      "name": "对位精度",
+      "value": 0.05,
+      "lower": null,
+      "upper": null,
+      "unit": "mm",
+      "basis": null,
+      "capability_code": "POSITION",
+      "note": null
+    },
+    {
+      "parameter_code": "force",
+      "name": "伺服压合力",
+      "value": 2.5,
+      "lower": 0.5,
+      "upper": 5.0,
+      "unit": "kN",
+      "basis": null,
+      "capability_code": "ASSEMBLE",
+      "note": null
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "mat_in",
+      "name": "进料物料接口",
+      "interface_type": "material_flow",
+      "direction": "input",
+      "compatible_conditions": [
+        "检测后电芯+预处理后导热壳"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mat_out",
+      "name": "出料物料接口",
+      "interface_type": "material_flow",
+      "direction": "output",
+      "compatible_conditions": [
+        "单体组件"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "ctrl_main",
+      "name": "产线控制接口",
+      "interface_type": "control",
+      "direction": "bidirectional",
+      "compatible_conditions": [
+        "PLC同步信号",
+        "安全联锁"
+      ],
+      "protocol": "OPC-UA",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "pwr_ac",
+      "name": "工业供电接口",
+      "interface_type": "electrical",
+      "direction": "input",
+      "compatible_conditions": [
+        "380V AC 3P"
+      ],
+      "protocol": "IEC-60309",
+      "payload_schema": null,
+      "optional": false
+    }
+  ],
+  "geometry": {
+    "dimensions_mm": {
+      "length": 2600.0,
+      "width": 1800.0,
+      "height": 2200.0
+    },
+    "coordinate_system": "RHS_Z_UP_MM",
+    "mounting_datum": "bottom_center_floor",
+    "connection_points": [
+      {
+        "point_id": "pt_in",
+        "interface_id": "mat_in",
+        "position_mm": [
+          0.0,
+          900.0,
+          900.0
+        ],
+        "normal": [
+          -1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "point_id": "pt_out",
+        "interface_id": "mat_out",
+        "position_mm": [
+          2600.0,
+          900.0,
+          900.0
+        ],
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "completeness": "complete"
+  },
+  "behavior": {
+    "cycle_time_s": 10.0,
+    "cycle_time_basis": "单体组件",
+    "batch_size": 1,
+    "operating_states": [
+      "IDLE",
+      "RUNNING",
+      "FAULT",
+      "MAINTENANCE"
+    ],
+    "behavior_model_ref": null,
+    "behavior_model_type": "discrete_event",
+    "availability": 0.98
+  },
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-ASM-01",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": null
+  }
+}

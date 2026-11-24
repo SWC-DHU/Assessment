@@ -1,0 +1,179 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-ADH-04",
+    "name": "模组单体双组份结构胶施胶机",
+    "category": "adhesive",
+    "subcategory": "平面涂胶机",
+    "description": "标准计量泵式单体组件平面涂胶设备，支持 AB 结构胶混合与指定平面涂覆。",
+    "version": "1.0.0",
+    "tags": [
+      "单体组件",
+      "胶料",
+      "平面涂胶",
+      "标准型"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "ADHESIVE_APPLY",
+      "name": "涂胶",
+      "description": "单体组件表面双组份结构胶自动施胶",
+      "qualitative_features": [
+        "adhesive_placement",
+        "assembly_alignment"
+      ],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "cell_unit",
+      "adhesive"
+    ],
+    "input_material_types": [
+      "cell_unit",
+      "adhesive"
+    ],
+    "output_material_types": [
+      "cell_unit"
+    ],
+    "specifications": [],
+    "input_states": [
+      "assembled"
+    ],
+    "output_states": [
+      "glued"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "cell_unit",
+        "from_state": "assembled",
+        "to_state": "glued",
+        "condition": null
+      }
+    ],
+    "notes": null
+  },
+  "parameters": [
+    {
+      "parameter_code": "process_time",
+      "name": "单组件涂胶工时",
+      "value": 12.5,
+      "lower": null,
+      "upper": null,
+      "unit": "s",
+      "basis": "单体组件",
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "dispense_accuracy",
+      "name": "胶路精度",
+      "value": 0.35,
+      "lower": null,
+      "upper": null,
+      "unit": "mm",
+      "basis": null,
+      "capability_code": "ADHESIVE_APPLY",
+      "note": null
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "mat_in",
+      "name": "进料物料接口",
+      "interface_type": "material_flow",
+      "direction": "input",
+      "compatible_conditions": [
+        "单体组件+胶料"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mat_out",
+      "name": "出料物料接口",
+      "interface_type": "material_flow",
+      "direction": "output",
+      "compatible_conditions": [
+        "涂胶后单体组件"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "ctrl_main",
+      "name": "产线控制接口",
+      "interface_type": "control",
+      "direction": "bidirectional",
+      "compatible_conditions": [
+        "PLC同步信号",
+        "安全联锁"
+      ],
+      "protocol": "OPC-UA",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "pwr_ac",
+      "name": "工业供电接口",
+      "interface_type": "electrical",
+      "direction": "input",
+      "compatible_conditions": [
+        "380V AC 3P"
+      ],
+      "protocol": "IEC-60309",
+      "payload_schema": null,
+      "optional": false
+    }
+  ],
+  "geometry": {
+    "dimensions_mm": {
+      "length": 2000.0,
+      "width": 1500.0,
+      "height": 2000.0
+    },
+    "coordinate_system": "RHS_Z_UP_MM",
+    "mounting_datum": "bottom_center_floor",
+    "connection_points": [],
+    "completeness": "partial"
+  },
+  "behavior": {
+    "cycle_time_s": 12.5,
+    "cycle_time_basis": "单体组件",
+    "batch_size": 1,
+    "operating_states": [
+      "IDLE",
+      "RUNNING",
+      "FAULT",
+      "MAINTENANCE"
+    ],
+    "behavior_model_ref": null,
+    "behavior_model_type": "discrete_event",
+    "availability": 0.95
+  },
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-ADH-04",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": null
+  }
+}

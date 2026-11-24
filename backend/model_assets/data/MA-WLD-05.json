@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-WLD-05",
+    "name": "五轴激光加工实验原型站（功率与工时待确认）",
+    "category": "welding",
+    "subcategory": "原型激光加工站",
+    "description": "具备五轴激光加工与连接片焊接能力的数字孪生概念原型，缺少激光功率、定位精度和标称工时参数。",
+    "version": "1.0.0",
+    "tags": [
+      "五轴",
+      "激光加工",
+      "焊接",
+      "模组",
+      "参数缺失",
+      "待确认"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "MACHINE",
+      "name": "加工",
+      "description": "五轴激光加工原型能力",
+      "qualitative_features": [
+        "weld_quality"
+      ],
+      "is_primary": true
+    },
+    {
+      "code": "WELD",
+      "name": "焊接",
+      "description": "连接片激光焊接原型能力",
+      "qualitative_features": [
+        "weld_quality"
+      ],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "battery_module"
+    ],
+    "input_material_types": [],
+    "output_material_types": [],
+    "specifications": [],
+    "input_states": [
+      "strapped"
+    ],
+    "output_states": [
+      "laser_processed"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "battery_module",
+        "from_state": "strapped",
+        "to_state": "laser_processed",
+        "condition": null
+      }
+    ],
+    "notes": "缺少激光功率、定位精度与工时参数，用于验证待确认分流。"
+  },
+  "parameters": [],
+  "interfaces": [],
+  "geometry": null,
+  "behavior": null,
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-WLD-05",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": "缺少激光功率、定位精度与工时参数，用于验证待确认分流。"
+  }
+}

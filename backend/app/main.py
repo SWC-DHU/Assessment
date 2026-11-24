@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import agents, samples, semantics, sessions, templates
+from app.api import agents, model_assets, resource_matching, samples, semantics, sessions, templates
 from app.config import settings
 from domain_semantics.catalog import check_ontology
 from app.database import Base, SessionLocal, engine
@@ -42,6 +42,8 @@ app.include_router(templates.router)
 app.include_router(sessions.router)
 app.include_router(samples.router)
 app.include_router(semantics.router)
+app.include_router(model_assets.router)
+app.include_router(resource_matching.router)
 
 
 @app.get("/api/health")

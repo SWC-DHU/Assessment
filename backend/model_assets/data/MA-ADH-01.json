@@ -1,0 +1,220 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-ADH-01",
+    "name": "方形电芯全自动精密贴蓝膜/绝缘胶工作站",
+    "category": "adhesive",
+    "subcategory": "电芯贴胶机",
+    "description": "面向清洗后方形电芯的自动贴附绝缘辅材与蓝膜设备，配备恒张力放卷、视觉纠偏与柔性滚压抚平机构，确保表面平整无翘边。",
+    "version": "1.0.0",
+    "tags": [
+      "方形电芯",
+      "贴胶",
+      "绝缘辅材",
+      "平整无翘边"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "ADHESIVE_APPLY",
+      "name": "贴胶",
+      "description": "电芯指定面高精度贴附胶带/绝缘辅材并滚压抚平",
+      "qualitative_features": [
+        "adhesive_placement",
+        "surface_condition",
+        "assembly_alignment"
+      ],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "prismatic_cell",
+      "adhesive_tape"
+    ],
+    "input_material_types": [
+      "prismatic_cell",
+      "adhesive_tape"
+    ],
+    "output_material_types": [
+      "prismatic_cell"
+    ],
+    "specifications": [],
+    "input_states": [
+      "cleaned"
+    ],
+    "output_states": [
+      "taped"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "prismatic_cell",
+        "from_state": "cleaned",
+        "to_state": "taped",
+        "condition": null
+      }
+    ],
+    "notes": null
+  },
+  "parameters": [
+    {
+      "parameter_code": "process_time",
+      "name": "单电芯贴胶工时",
+      "value": 8.5,
+      "lower": 7.0,
+      "upper": 11.0,
+      "unit": "s",
+      "basis": "电芯",
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "dispense_accuracy",
+      "name": "贴附位置精度",
+      "value": 0.2,
+      "lower": null,
+      "upper": null,
+      "unit": "mm",
+      "basis": null,
+      "capability_code": "ADHESIVE_APPLY",
+      "note": null
+    },
+    {
+      "parameter_code": "tolerance",
+      "name": "贴胶对齐公差",
+      "value": 0.25,
+      "lower": null,
+      "upper": null,
+      "unit": "mm",
+      "basis": null,
+      "capability_code": "ADHESIVE_APPLY",
+      "note": null
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "mat_in",
+      "name": "进料物料接口",
+      "interface_type": "material_flow",
+      "direction": "input",
+      "compatible_conditions": [
+        "清洗后电芯+贴胶辅材卷料"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mat_out",
+      "name": "出料物料接口",
+      "interface_type": "material_flow",
+      "direction": "output",
+      "compatible_conditions": [
+        "贴胶后电芯"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "ctrl_main",
+      "name": "产线控制接口",
+      "interface_type": "control",
+      "direction": "bidirectional",
+      "compatible_conditions": [
+        "PLC同步信号",
+        "安全联锁"
+      ],
+      "protocol": "OPC-UA",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "pwr_ac",
+      "name": "工业供电接口",
+      "interface_type": "electrical",
+      "direction": "input",
+      "compatible_conditions": [
+        "380V AC 3P"
+      ],
+      "protocol": "IEC-60309",
+      "payload_schema": null,
+      "optional": false
+    }
+  ],
+  "geometry": {
+    "dimensions_mm": {
+      "length": 2100.0,
+      "width": 1500.0,
+      "height": 2050.0
+    },
+    "coordinate_system": "RHS_Z_UP_MM",
+    "mounting_datum": "bottom_center_floor",
+    "connection_points": [
+      {
+        "point_id": "pt_in",
+        "interface_id": "mat_in",
+        "position_mm": [
+          0.0,
+          750.0,
+          900.0
+        ],
+        "normal": [
+          -1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "point_id": "pt_out",
+        "interface_id": "mat_out",
+        "position_mm": [
+          2100.0,
+          750.0,
+          900.0
+        ],
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "completeness": "complete"
+  },
+  "behavior": {
+    "cycle_time_s": 8.5,
+    "cycle_time_basis": "电芯",
+    "batch_size": 1,
+    "operating_states": [
+      "IDLE",
+      "RUNNING",
+      "FAULT",
+      "MAINTENANCE"
+    ],
+    "behavior_model_ref": null,
+    "behavior_model_type": "discrete_event",
+    "availability": 0.98
+  },
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-ADH-01",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": null
+  }
+}

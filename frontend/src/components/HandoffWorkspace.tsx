@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Button, Empty } from "antd";
-import { ArrowDownToLine, GitBranch } from "lucide-react";
+import { ArrowDownToLine, Cpu, GitBranch } from "lucide-react";
 import { api } from "../api/client";
 import type { ModelingTask, ResourceMatchingInput, SemanticEntity, SemanticModel } from "../types";
 import { Citations, ReviewPill } from "./SemanticDetails";
@@ -45,13 +45,14 @@ function RelatedFacts({ keys, records, onLocate }: {
   </li>)}</ul>;
 }
 
-export function HandoffWorkspace({ sessionId, model, onLocate, onSource, onTopology, onSchema }: {
+export function HandoffWorkspace({ sessionId, model, onLocate, onSource, onTopology, onSchema, onStartMatching }: {
   sessionId: string;
   model: SemanticModel;
   onLocate: (id: string) => void;
   onSource: (id: string) => void;
   onTopology: () => void;
   onSchema: () => void;
+  onStartMatching?: (sessionId: string, versionId: string) => void;
 }) {
   const [data, setData] = useState<ResourceMatchingInput>();
   const [error, setError] = useState("");
@@ -80,6 +81,11 @@ export function HandoffWorkspace({ sessionId, model, onLocate, onSource, onTopol
     <div className="result-heading">
       <div><h3>下游标准输入</h3><p>契约 {data.contract_version} · 来源版本 {data.source_model.run_id.slice(0, 8)}</p></div>
       <div className="result-actions">
+        {onStartMatching && report.status !== "blocked" && (
+          <Button size="small" type="primary" icon={<Cpu size={14} />} onClick={() => onStartMatching(sessionId, model.run_id)}>
+            进入资源匹配
+          </Button>
+        )}
         <Button size="small" onClick={onSchema}>查看 Schema</Button>
         <Button size="small" icon={<ArrowDownToLine size={14} />} href={api.exportResourceMatchingUrl(sessionId, model.run_id)}>
           {report.status === "blocked" ? "导出诊断 JSON" : "导出交接 JSON"}

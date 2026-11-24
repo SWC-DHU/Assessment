@@ -146,3 +146,19 @@ class AgentExecutionSettings(Base):
 
     agent_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     config: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
+class ResourceMatchingRun(Base):
+    __tablename__ = "resource_matching_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    session_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("test_sessions.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    semantic_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    method: Mapped[str] = mapped_column(String(10), default="C", nullable=False)
+    matching_status: Mapped[str] = mapped_column(String(32), default="completed", nullable=False)
+    catalog_version: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    config: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    output: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(timezone=True), default=_utcnow, nullable=False)

@@ -497,7 +497,7 @@ export interface ResourceMatchingInput {
   handoff_validation: { status: HandoffStatus; issues: HandoffIssue[] };
 }
 
-export type ContractKind = "candidates" | "formal" | "handoff";
+export type ContractKind = "candidates" | "formal" | "handoff" | "model_asset" | "matching_output";
 export interface ContractSchema {
   title?: string;
   description?: string;
@@ -534,3 +534,321 @@ export type ReviewRequest = { note: string } & (
   | { action: "confirm_fact"; fact_id: string }
   | { action: "set_modeling_task"; target_scope?: ModelingScope; target_product_id?: string }
 );
+
+// ===== Model Asset Library Types =====
+export type AssetCategory =
+  | "feeding" | "cleaning" | "adhesive" | "stacking" | "assembly"
+  | "welding" | "inspection" | "transport" | "robot" | "auxiliary";
+
+export type BindingStatus = "unbound" | "reserved" | "bound";
+export type ModelFileFormat = "glb" | "gltf" | "step" | "stp" | "usd" | "obj" | "fbx" | "none";
+
+export interface ModelAsset {
+  schema_version: string;
+  data_source: "synthetic" | "vendor_spec" | "calibrated" | "imported";
+  instantiation_policy: {
+    reusable: boolean;
+    max_parallel_instances?: number | null;
+    instance_id_pattern: string;
+    notes?: string | null;
+  };
+  identity: {
+    asset_id: string;
+    name: string;
+    category: AssetCategory;
+    subcategory?: string | null;
+    description: string;
+    version: string;
+    tags: string[];
+  };
+  capabilities: {
+    code: string;
+    name: string;
+    description: string;
+    qualitative_features: string[];
+    is_primary: boolean;
+  }[];
+  material_compatibility: {
+    supported_material_types: string[];
+    input_material_types: string[];
+    output_material_types: string[];
+    specifications: {
+      material_type: string;
+      spec_name: string;
+      min_value?: number | null;
+      max_value?: number | null;
+      unit?: string | null;
+      note?: string | null;
+    }[];
+    input_states: string[];
+    output_states: string[];
+    state_transitions: {
+      material_type?: string | null;
+      from_state: string;
+      to_state: string;
+      condition?: string | null;
+    }[];
+    notes?: string | null;
+  };
+  parameters: {
+    parameter_code: string;
+    name: string;
+    value?: number | null;
+    lower?: number | null;
+    upper?: number | null;
+    unit: string;
+    basis?: string | null;
+    capability_code?: string | null;
+    note?: string | null;
+  }[];
+  interfaces: {
+    interface_id: string;
+    name: string;
+    interface_type: "material_flow" | "mechanical" | "electrical" | "pneumatic" | "information" | "control";
+    direction: "input" | "output" | "bidirectional";
+    compatible_conditions: string[];
+    protocol?: string | null;
+    payload_schema?: string | null;
+    optional: boolean;
+  }[];
+  geometry?: {
+    dimensions_mm?: { length: number; width: number; height: number } | null;
+    coordinate_system?: string | null;
+    mounting_datum?: string | null;
+    connection_points: {
+      point_id: string;
+      interface_id?: string | null;
+      position_mm: [number, number, number];
+      normal?: [number, number, number] | null;
+    }[];
+    completeness: "complete" | "partial" | "placeholder";
+  } | null;
+  behavior?: {
+    cycle_time_s?: number | null;
+    cycle_time_basis?: string | null;
+    batch_size?: number | null;
+    operating_states: string[];
+    behavior_model_ref?: string | null;
+    behavior_model_type?: string | null;
+    availability?: number | null;
+  } | null;
+  model_binding: {
+    model_uri?: string | null;
+    file_format?: ModelFileFormat | null;
+    binding_status: BindingStatus;
+    asset_ref_key?: string | null;
+    checksum_sha256?: string | null;
+    notes?: string | null;
+  };
+  provenance: {
+    author: string;
+    created_at: string;
+    synthetic_disclaimer?: string | null;
+    notes?: string | null;
+  };
+}
+
+export interface AssetValidationIssue {
+  code: string;
+  severity: "error" | "warning";
+  path: string;
+  message: string;
+}
+
+export interface AssetValidationResult {
+  asset_id?: string | null;
+  valid: boolean;
+  completeness_score: number;
+  missing_fields: string[];
+  issues: AssetValidationIssue[];
+}
+
+export interface AssetCatalogItem {
+  asset: ModelAsset;
+  validation: AssetValidationResult | null;
+}
+
+export interface AssetCatalogListResponse {
+  catalog_version: string;
+  catalog_digest: string;
+  total: number;
+  items: AssetCatalogItem[];
+}
+
+export interface AssetCatalogSummary {
+  schema_version: string;
+  catalog_version: string;
+  catalog_digest: string;
+  total_assets: number;
+  valid_assets: number;
+  by_category: { code: string; label: string; count: number }[];
+  by_capability: Record<string, number>;
+  by_binding_status: Record<string, number>;
+  by_data_source: Record<string, number>;
+}
+
+// ===== Resource Matching Agent Types =====
+export type CheckVerdict = "PASS" | "FAIL" | "UNKNOWN";
+export type MatchingMethod = "A" | "B" | "C";
+
+export interface ScoringWeights {
+  functional_fit: number;
+  material_fit: number;
+  technical_performance: number;
+  modeling_completeness: number;
+}
+
+export interface ResourceMatchingConfig {
+  top_k: number;
+  partial_top_k: number;
+  method: MatchingMethod;
+  use_llm: boolean;
+  allow_warnings_input: boolean;
+  force_blocked_diagnostic: boolean;
+  include_rejected_details: boolean;
+  weights: ScoringWeights;
+}
+
+export interface ConstraintCheckItem {
+  check_id: string;
+  scope: "operation" | "capability" | "line" | "material" | "state" | "interface" | "equipment";
+  constraint_id?: string | null;
+  parameter_code?: string | null;
+  is_hard: boolean;
+  verdict: CheckVerdict;
+  required_summary: string;
+  asset_summary: string;
+  rationale: string;
+}
+
+export interface ScoreBreakdown {
+  functional_fit: number;
+  material_fit: number;
+  technical_performance: number;
+  modeling_completeness: number;
+  total_score: number;
+}
+
+export interface CandidateEvaluation {
+  asset_id: string;
+  asset_name: string;
+  asset_category: string;
+  data_source: string;
+  binding_status: string;
+  disposition: "qualified" | "partial_qualified" | "pending_confirmation" | "rejected";
+  rank?: number | null;
+  covered_capabilities: string[];
+  missing_capabilities: string[];
+  capability_coverage: number;
+  hard_constraint_verdict: CheckVerdict;
+  constraint_checks: ConstraintCheckItem[];
+  score_breakdown: ScoreBreakdown;
+  match_reasons: string[];
+  rejection_reasons: string[];
+  missing_information: string[];
+  line_takt_reference?: string | null;
+}
+
+export interface CapabilityPartialCandidates {
+  capability_code: string;
+  capability_name?: string | null;
+  candidates: CandidateEvaluation[];
+  pending_candidates: CandidateEvaluation[];
+  unmet: boolean;
+}
+
+export interface UnmetRequirement {
+  code: string;
+  scope: string;
+  message: string;
+  capability_codes: string[];
+}
+
+export interface OperationMatchingResult {
+  operation_id: string;
+  operation_number?: string | null;
+  operation_name: string;
+  operation_type?: string | null;
+  required_capability_codes: string[];
+  input_materials: string[];
+  output_materials: string[];
+  input_states: string[];
+  output_states: string[];
+  information_flows: string[];
+  equipment_requirement?: string | null;
+  operation_constraint_ids: string[];
+  capability_constraint_ids: string[];
+  match_status: "matched_single" | "matched_partial_composable" | "pending_only" | "unmatched" | "blocked";
+  multi_asset_recommended: boolean;
+  top_k_candidates: CandidateEvaluation[];
+  partial_candidates_by_capability: CapabilityPartialCandidates[];
+  pending_candidates: CandidateEvaluation[];
+  rejected_candidates: CandidateEvaluation[];
+  unmet_requirements: UnmetRequirement[];
+  llm_explanation?: string | null;
+  diagnostics: string[];
+}
+
+export interface LineConstraintReference {
+  constraint_id: string;
+  name: string;
+  parameter_code?: string | null;
+  comparator?: string | null;
+  value?: number | null;
+  lower?: number | null;
+  upper?: number | null;
+  unit?: string | null;
+  basis?: string | null;
+  strength: string;
+  description?: string | null;
+  note: string;
+}
+
+export interface MatchingSummary {
+  total_operations: number;
+  matched_single_count: number;
+  matched_partial_count: number;
+  pending_only_count: number;
+  unmatched_count: number;
+  blocked_count: number;
+  average_top1_capability_coverage: number;
+  total_duration_ms: number;
+  llm_calls: number;
+  llm_model_used?: string | null;
+}
+
+export interface ResourceMatchingOutput {
+  contract_version: "1.0.0";
+  run_id: string;
+  created_at: string;
+  source_requirement_version: string;
+  source_content_digest: string;
+  source_handoff_status: HandoffStatus;
+  catalog_version: string;
+  catalog_digest: string;
+  ontology_version: string;
+  vocabulary_version: string;
+  config: ResourceMatchingConfig;
+  modeling_task?: ModelingTask | null;
+  target_product_ids: string[];
+  line_constraints: LineConstraintReference[];
+  process_graph: ProcessGraph;
+  relations: SemanticRelation[];
+  operation_matches: OperationMatchingResult[];
+  matching_status: "completed" | "completed_with_warnings" | "partial" | "blocked";
+  summary: MatchingSummary;
+  diagnostics: { code: string; severity: "blocker" | "warning" | "info"; operation_id?: string | null; message: string }[];
+  tool_trace: { step: string; tool: string; status: string; duration_ms: number; summary: string }[];
+}
+
+export interface MatchingRunSummary {
+  run_id: string;
+  session_id?: string | null;
+  semantic_version_id?: string | null;
+  method: MatchingMethod;
+  matching_status: string;
+  catalog_version: string;
+  top_k: number;
+  summary?: MatchingSummary | null;
+  created_at: string;
+}

@@ -27,3 +27,18 @@
 ## 证据与执行
 
 证据包含文件或消息 ID、原文片段、工作表与单元格或文段位置以及提取方法。确定性规则处理已识别表列和明确文本表达。LLM 按批接收剩余片段，输出带引文的候选。程序复用已处理且内容一致的来源，部分失败时保留已核验事实及已成功的批次。兼容导出和历史版本通过原有接口访问。
+
+## 资源侧轻量本体与词表扩展
+
+在不破坏原有六大核心类和 3.0.0 兼容性的前提下，新增 `ontology/resources.ttl` 与 `units.py`，并轻量扩展 `vocabulary/manufacturing.yaml`：
+
+- **新增本体类**：`ModelAsset`（模型资产定义，与三维文件和产线实例解耦）、`ResourceCapability`（资源能力，共享受控能力编码）、`Interface`（物料流/机械/电气/气动/控制/信息接口）。
+- **新增资源侧对象属性**：`providesCapability`、`satisfiesCapability`、`hasInterface`、`handlesMaterial`、`supportsState`、`addressesConstraint`。
+- **共享词表扩展**：新增 `asset_categories`（10 类设备）、`material_types`（16 类标准物料）、`material_state_codes`（16 类标准状态）、`interface_types`（6 类接口）及通用设备技术参数编码与单位换算规则（`units.py`）。
+- **六项需求↔资源语义对应关系**（可通过 `/api/resource-matching/mappings` 查询）：
+  1. 所需制造能力 ↔ 模型提供能力（`satisfiesCapability`）
+  2. 输入输出物料 ↔ 模型物料适配条件（`handlesMaterial`）
+  3. 工艺约束 ↔ 模型技术参数与定性特性（`addressesConstraint`）
+  4. 物料状态要求 ↔ 模型支持状态转换（`supportsState`）
+  5. 设备要求 ↔ 模型类别及功能（`assetCategory`）
+  6. 信息流要求 ↔ 模型信息接口（`hasInterface`）

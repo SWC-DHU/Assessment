@@ -1,0 +1,251 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-AUX-01",
+    "name": "导热壳全自动预处理集成工作站",
+    "category": "auxiliary",
+    "subcategory": "旁路预处理集成站",
+    "description": "面向导热壳旁路工艺的一体化工作站，集成导热壳上料、激光打码、高清读码绑定及高精度路径涂胶，并自动向 MES 输出标识信息。",
+    "version": "1.0.0",
+    "tags": [
+      "导热壳",
+      "上料",
+      "打码",
+      "读码",
+      "涂胶",
+      "标识信息",
+      "集成工作站"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "FEED",
+      "name": "供料",
+      "description": "导热壳来料自动上料与姿态校正",
+      "qualitative_features": [
+        "material_compatibility",
+        "material_handling"
+      ],
+      "is_primary": true
+    },
+    {
+      "code": "CODE_MARK",
+      "name": "打码",
+      "description": "紫外/光纤激光清晰打码",
+      "qualitative_features": [
+        "identification"
+      ],
+      "is_primary": true
+    },
+    {
+      "code": "CODE_READ",
+      "name": "读码",
+      "description": "打码后自动视觉读码评级并绑定",
+      "qualitative_features": [
+        "identification"
+      ],
+      "is_primary": true
+    },
+    {
+      "code": "ADHESIVE_APPLY",
+      "name": "涂胶",
+      "description": "导热壳内腔按指定胶路自动涂胶",
+      "qualitative_features": [
+        "adhesive_placement"
+      ],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "thermal_shell",
+      "adhesive"
+    ],
+    "input_material_types": [
+      "thermal_shell",
+      "adhesive"
+    ],
+    "output_material_types": [
+      "thermal_shell"
+    ],
+    "specifications": [],
+    "input_states": [
+      "incoming"
+    ],
+    "output_states": [
+      "pretreated"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "thermal_shell",
+        "from_state": "incoming",
+        "to_state": "pretreated",
+        "condition": null
+      }
+    ],
+    "notes": null
+  },
+  "parameters": [
+    {
+      "parameter_code": "process_time",
+      "name": "单导热壳预处理工时",
+      "value": 10.5,
+      "lower": 9.0,
+      "upper": 13.0,
+      "unit": "s",
+      "basis": "件",
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "dispense_accuracy",
+      "name": "胶路精度",
+      "value": 0.18,
+      "lower": null,
+      "upper": null,
+      "unit": "mm",
+      "basis": null,
+      "capability_code": "ADHESIVE_APPLY",
+      "note": null
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "mat_in",
+      "name": "进料物料接口",
+      "interface_type": "material_flow",
+      "direction": "input",
+      "compatible_conditions": [
+        "导热壳来料+胶料"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mat_out",
+      "name": "出料物料接口",
+      "interface_type": "material_flow",
+      "direction": "output",
+      "compatible_conditions": [
+        "预处理后导热壳"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "ctrl_main",
+      "name": "产线控制接口",
+      "interface_type": "control",
+      "direction": "bidirectional",
+      "compatible_conditions": [
+        "PLC同步信号",
+        "安全联锁"
+      ],
+      "protocol": "OPC-UA",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "pwr_ac",
+      "name": "工业供电接口",
+      "interface_type": "electrical",
+      "direction": "input",
+      "compatible_conditions": [
+        "380V AC 3P"
+      ],
+      "protocol": "IEC-60309",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "info_mes",
+      "name": "MES信息流上报接口",
+      "interface_type": "information",
+      "direction": "output",
+      "compatible_conditions": [
+        "标识信息",
+        "追溯信息"
+      ],
+      "protocol": "MES-REST/OPC-UA",
+      "payload_schema": "JSON traceability record",
+      "optional": false
+    }
+  ],
+  "geometry": {
+    "dimensions_mm": {
+      "length": 2800.0,
+      "width": 1700.0,
+      "height": 2150.0
+    },
+    "coordinate_system": "RHS_Z_UP_MM",
+    "mounting_datum": "bottom_center_floor",
+    "connection_points": [
+      {
+        "point_id": "pt_in",
+        "interface_id": "mat_in",
+        "position_mm": [
+          0.0,
+          850.0,
+          900.0
+        ],
+        "normal": [
+          -1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "point_id": "pt_out",
+        "interface_id": "mat_out",
+        "position_mm": [
+          2800.0,
+          850.0,
+          900.0
+        ],
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "completeness": "complete"
+  },
+  "behavior": {
+    "cycle_time_s": 10.5,
+    "cycle_time_basis": "件",
+    "batch_size": 1,
+    "operating_states": [
+      "IDLE",
+      "RUNNING",
+      "FAULT",
+      "MAINTENANCE"
+    ],
+    "behavior_model_ref": null,
+    "behavior_model_type": "discrete_event",
+    "availability": 0.98
+  },
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-AUX-01",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": null
+  }
+}

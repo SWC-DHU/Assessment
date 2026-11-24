@@ -1,0 +1,164 @@
+{
+  "name": "方形电池模组装配产线工序—模型资产匹配人工标注 Gold",
+  "version": "1.0.0",
+  "source_case": "test case/工艺需求文件.xlsx + test case/自然语言建模需求.md",
+  "annotation_note": "独立人工标注每道工序在当前 synthetic 模型资产库中的合格单资产集合、待确认资产、典型干扰资产及多能力拆分协同候选，仅供离线与在线匹配评测，不参与运行时匹配逻辑。",
+  "operations": [
+    {
+      "operation_number": "01",
+      "operation_name": "电芯上料",
+      "required_capability_codes": ["FEED", "GRIP", "POSITION"],
+      "qualified_single_assets": ["MA-FEED-01", "MA-FEED-02"],
+      "expected_pending_assets": ["MA-FEED-05"],
+      "expected_rejected_distractors": ["MA-FEED-04", "MA-FEED-03", "MA-ROB-01"],
+      "composable_partial_assets": {
+        "FEED": ["MA-FEED-03", "MA-FEED-01", "MA-FEED-02"],
+        "GRIP": ["MA-ROB-01", "MA-FEED-01", "MA-FEED-02"],
+        "POSITION": ["MA-ROB-01", "MA-FEED-01", "MA-FEED-02"]
+      }
+    },
+    {
+      "operation_number": "02",
+      "operation_name": "激光清洗",
+      "required_capability_codes": ["LASER_CLEAN"],
+      "qualified_single_assets": ["MA-CLEAN-01", "MA-CLEAN-02", "MA-CLEAN-03"],
+      "expected_pending_assets": [],
+      "expected_rejected_distractors": ["MA-CLEAN-04", "MA-CLEAN-08"]
+    },
+    {
+      "operation_number": "03",
+      "operation_name": "贴胶",
+      "required_capability_codes": ["ADHESIVE_APPLY"],
+      "qualified_single_assets": ["MA-ADH-01", "MA-ADH-02"],
+      "expected_pending_assets": [],
+      "expected_rejected_distractors": ["MA-ADH-07", "MA-ADH-03", "MA-ADH-05"]
+    },
+    {
+      "operation_number": "04",
+      "operation_name": "电芯清洗与检测",
+      "required_capability_codes": ["CLEAN", "INSPECT", "CODE_READ"],
+      "qualified_single_assets": ["MA-CLEAN-05", "MA-CLEAN-06"],
+      "expected_pending_assets": [],
+      "expected_rejected_distractors": ["MA-CLEAN-07", "MA-AUX-04", "MA-INS-03"],
+      "composable_partial_assets": {
+        "CLEAN": ["MA-CLEAN-07", "MA-CLEAN-05", "MA-CLEAN-06"],
+        "INSPECT": ["MA-AUX-04", "MA-CLEAN-05", "MA-CLEAN-06"],
+        "CODE_READ": ["MA-AUX-04", "MA-AUX-03", "MA-CLEAN-05"]
+      }
+    },
+    {
+      "operation_number": "Z1",
+      "operation_name": "导热壳预处理",
+      "required_capability_codes": ["FEED", "CODE_MARK", "CODE_READ", "ADHESIVE_APPLY"],
+      "qualified_single_assets": ["MA-AUX-01", "MA-AUX-02"],
+      "expected_pending_assets": [],
+      "expected_rejected_distractors": ["MA-FEED-09", "MA-AUX-03", "MA-ADH-05"],
+      "composable_partial_assets": {
+        "FEED": ["MA-FEED-09", "MA-AUX-01", "MA-AUX-02"],
+        "CODE_MARK": ["MA-AUX-03", "MA-AUX-01", "MA-AUX-02"],
+        "CODE_READ": ["MA-AUX-03", "MA-AUX-01", "MA-AUX-02"],
+        "ADHESIVE_APPLY": ["MA-ADH-05", "MA-AUX-01", "MA-AUX-02"]
+      }
+    },
+    {
+      "operation_number": "05",
+      "operation_name": "单体装配",
+      "required_capability_codes": ["POSITION", "ASSEMBLE"],
+      "qualified_single_assets": ["MA-ASM-01", "MA-ASM-02", "MA-ROB-03"],
+      "expected_pending_assets": [],
+      "expected_rejected_distractors": ["MA-ASM-03", "MA-ASM-05", "MA-ROB-01"],
+      "composable_partial_assets": {
+        "POSITION": ["MA-ROB-01", "MA-ASM-01", "MA-ROB-03"],
+        "ASSEMBLE": ["MA-ASM-01", "MA-ROB-03", "MA-ASM-02"]
+      }
+    },
+    {
+      "operation_number": "06",
+      "operation_name": "平面涂胶",
+      "required_capability_codes": ["ADHESIVE_APPLY"],
+      "qualified_single_assets": ["MA-ADH-03", "MA-ADH-04"],
+      "expected_pending_assets": ["MA-ADH-06"],
+      "expected_rejected_distractors": ["MA-ADH-01", "MA-ADH-05"]
+    },
+    {
+      "operation_number": "07",
+      "operation_name": "单体并联堆叠",
+      "required_capability_codes": ["STACK"],
+      "qualified_single_assets": ["MA-STK-01", "MA-STK-02", "MA-STK-04"],
+      "expected_pending_assets": [],
+      "expected_rejected_distractors": ["MA-STK-03"]
+    },
+    {
+      "operation_number": "Z2",
+      "operation_name": "中板输送上料",
+      "required_capability_codes": ["FEED", "TRANSPORT"],
+      "qualified_single_assets": ["MA-FEED-06", "MA-FEED-08"],
+      "expected_pending_assets": [],
+      "expected_rejected_distractors": ["MA-FEED-07", "MA-TRN-03"],
+      "composable_partial_assets": {
+        "FEED": ["MA-FEED-06", "MA-FEED-08"],
+        "TRANSPORT": ["MA-TRN-03", "MA-FEED-06", "MA-FEED-08"]
+      }
+    },
+    {
+      "operation_number": "Z3",
+      "operation_name": "端板输送上料",
+      "required_capability_codes": ["FEED", "TRANSPORT"],
+      "qualified_single_assets": ["MA-FEED-07", "MA-FEED-08"],
+      "expected_pending_assets": [],
+      "expected_rejected_distractors": ["MA-FEED-06", "MA-TRN-03"],
+      "composable_partial_assets": {
+        "FEED": ["MA-FEED-07", "MA-FEED-08"],
+        "TRANSPORT": ["MA-TRN-03", "MA-FEED-07", "MA-FEED-08"]
+      }
+    },
+    {
+      "operation_number": "08",
+      "operation_name": "模组堆叠总装",
+      "required_capability_codes": ["ASSEMBLE"],
+      "qualified_single_assets": ["MA-ASM-03", "MA-ASM-04", "MA-ASM-10"],
+      "expected_pending_assets": [],
+      "expected_rejected_distractors": ["MA-ASM-01", "MA-ASM-05"]
+    },
+    {
+      "operation_number": "09",
+      "operation_name": "跨接片组装",
+      "required_capability_codes": ["ASSEMBLE"],
+      "qualified_single_assets": ["MA-ASM-05", "MA-ASM-06", "MA-ROB-03"],
+      "expected_pending_assets": [],
+      "expected_rejected_distractors": ["MA-ASM-01", "MA-ASM-03"]
+    },
+    {
+      "operation_number": "10",
+      "operation_name": "钢带捆扎",
+      "required_capability_codes": ["FASTEN"],
+      "qualified_single_assets": ["MA-ASM-07", "MA-ASM-08", "MA-ASM-09"],
+      "expected_pending_assets": [],
+      "expected_rejected_distractors": []
+    },
+    {
+      "operation_number": "11",
+      "operation_name": "五轴激光加工",
+      "required_capability_codes": ["MACHINE"],
+      "qualified_single_assets": ["MA-WLD-01", "MA-WLD-02"],
+      "expected_pending_assets": ["MA-WLD-05"],
+      "expected_rejected_distractors": ["MA-WLD-03", "MA-WLD-04"]
+    },
+    {
+      "operation_number": "12",
+      "operation_name": "EOL检测",
+      "required_capability_codes": ["INSPECT"],
+      "qualified_single_assets": ["MA-INS-01", "MA-INS-02"],
+      "expected_pending_assets": ["MA-INS-04"],
+      "expected_rejected_distractors": ["MA-INS-03", "MA-CLEAN-05"]
+    },
+    {
+      "operation_number": "13",
+      "operation_name": "模组下线",
+      "required_capability_codes": ["TRANSPORT"],
+      "qualified_single_assets": ["MA-TRN-01", "MA-TRN-02", "MA-ROB-02"],
+      "expected_pending_assets": [],
+      "expected_rejected_distractors": ["MA-AUX-05", "MA-TRN-03"]
+    }
+  ]
+}

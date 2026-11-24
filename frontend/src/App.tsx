@@ -6,9 +6,11 @@ import { AgentManagerModal } from "./components/AgentManagerModal";
 import { ChatWorkbench, type RunStage } from "./components/ChatWorkbench";
 import { FilePreviewModal } from "./components/FilePreviewModal";
 import { LeftSidebar } from "./components/LeftSidebar";
+import { ModelAssetLibrary } from "./components/ModelAssetLibrary";
+import { ResourceMatchingWorkbench } from "./components/ResourceMatchingWorkbench";
 import { RightPanel, type ResultTab } from "./components/RightPanel";
 import { TemplateStudioModal } from "./components/TemplateStudioModal";
-import { TopBar } from "./components/TopBar";
+import { TopBar, type WorkspaceMode } from "./components/TopBar";
 import type {
   AgentConnectionTestResponse,
   AgentProfile,
@@ -56,6 +58,12 @@ export default function App() {
   const [progress, setProgress] = useState<PipelineStage[]>([]);
   const [demoMode, setDemoMode] = useState(false);
   const [strategy, setStrategy] = useState<"semantic" | "legacy">("semantic");
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("requirements");
+  const [inspectedAssetId, setInspectedAssetId] = useState<string | null>(null);
+  const [matchingTarget, setMatchingTarget] = useState<{ sessionId: string | null; versionId: string | null }>({
+    sessionId: null,
+    versionId: null,
+  });
   const [area, setArea] = useState("chat");
   const [tab, setTab] = useState<ResultTab>("overview");
   const [resultWidth, setResultWidth] = useState(43);
@@ -564,6 +572,13 @@ export default function App() {
   return (
     <div className="assessment-workspace">
       <TopBar
+        mode={workspaceMode}
+        onModeChange={(nextMode) => {
+          setWorkspaceMode(nextMode);
+          if (nextMode === "matching" && !matchingTarget.sessionId && activeSession) {
+            setMatchingTarget({ sessionId: activeSession.id, versionId: versions[0]?.id ?? null });
+          }
+        }}
         agents={agents}
         activeAgentId={activeAgentId}
         connectionStatus={activeAgentId ? agentConnStatuses[activeAgentId] : undefined}
@@ -586,55 +601,80 @@ export default function App() {
         />
       )}
 
-      <nav className="compact-nav" aria-label="切换工作区">
-        {([["files", "素材与会话", Files], ["chat", "需求对话", MessageSquare], ["results", "解析结果", Layers3]] as const)
-          .map(([id, label, Icon]) => <button type="button" key={id} aria-pressed={area === id} onClick={() => setArea(id)}>
-            <Icon size={16} />{label}</button>)}
-      </nav>
-      <main className="workbench-grid" data-area={area} data-left={!leftCollapsed} data-right={!rightCollapsed}
-        style={{ gridTemplateColumns: `${leftCollapsed ? "" : "minmax(210px, 232px) "}minmax(300px, 1fr)${rightCollapsed ? "" : ` minmax(350px, min(${resultWidth}%, calc(100% - ${leftCollapsed ? 300 : 532}px)))`}` }}>
-        <aside className="files-area">
-          <LeftSidebar sessions={sessions} activeSessionId={activeSession?.id || null} files={activeSession?.files || []}
-            onCreateSession={() => { if (!isRunning) void handleCreateSession(); }} onSelectSession={handleSelectSession}
-            onDeleteSession={handleDeleteSession} onPreviewFile={setPreviewFile} onDeleteFile={handleDeleteFile}
-            onReparseFile={handleReparse} uploadDisabled={!activeSession || isRunning || stage === "parsing"}
-            onUpload={() => { setArea("chat"); document.getElementById("workbench-upload")?.click(); }} />
-        </aside>
-        <div className="chat-area">
-          <ChatWorkbench ready={!!activeSession} key={activeSession?.id} messages={activeSession?.messages || []} files={activeSession?.files || []}
-            samples={samples} stage={stage} isRunning={isRunning} progress={progress} demoMode={demoMode} onToggleDemoMode={setDemoMode}
-            onUploadFiles={handleUploadFiles} onLoadSampleText={() => {}} onLoadSampleCsv={handleLoadSampleCsv}
-            onPreviewFile={setPreviewFile} onSendMessage={handleSendMessage} onAbortRun={handleAbortRun}
-            onRerunMessage={handleRerunMessage} onResumeMessage={(id) => handleRerunMessage(id, true)} onClearSession={handleClearSession}
-            onSelectDebugMessage={(id) => { setSelectedDebugMessageId(id); openResults("debug"); }}
-            onOpenAgentManager={() => setAgentModalOpen(true)}
-            onOpenResult={(id) => { void handleInspect(id); openResults("overview"); }}
-            revisionBase={revisionBase} onClearRevision={() => setRevisionBase(undefined)}
-            strategy={strategy} onStrategy={setStrategy} />
-        </div>
-        <aside className="results-area">
-          <label className="resize-result" title="调整结果面板宽度">
-            <span>面板宽度</span>
-            <input aria-label="调整结果面板宽度" type="range" min={36} max={53} value={resultWidth}
-              onChange={(event) => setResultWidth(Number(event.target.value))} />
-          </label>
-          <RightPanel sessionId={activeSession?.id ?? null} templates={templates} activeTemplateId={activeTemplateId} onSelectTemplate={handleSelectTemplate}
-            extractedJson={visibleData} templatePreview={templatePreview} onApplyJsonEdit={handleApplyJsonEdit}
-            onExport={handleExport} debugMessage={debugMessage} progress={progress} isRunning={isRunning} tab={tab} onTab={setTab} versions={versions}
-            onVersion={(id) => void handleInspect(id)} onRevise={(id) => {
-              setRevisionBase(id); setStrategy("semantic"); setArea("chat");
-              requestAnimationFrame(() => document.getElementById("workbench-input")?.focus());
-            }} onVerify={(id) => activeSession ? api.verifyVersion(activeSession.id, id) : Promise.reject("没有会话")
-            } onProject={handleProject} onReview={handleReview}
-            onOpenSource={(id, cite) => {
-              const file = activeSession?.files.find((item) => item.id === id);
-              const message = activeSession?.messages.find((item) => item.id === id);
-              if (file) { setSourceEvidence(cite); setPreviewFile(file); }
-              else if (message) setMessageSource({ text: message.content, cite });
-              else antdMessage.info("来源已从当前会话移除");
-            }} />
-        </aside>
-      </main>
+      {workspaceMode === "assets" ? (
+        <main className="module-main">
+          <ModelAssetLibrary initialAssetId={inspectedAssetId} />
+        </main>
+      ) : workspaceMode === "matching" ? (
+        <main className="module-main">
+          <ResourceMatchingWorkbench
+            sessions={sessions}
+            initialSessionId={matchingTarget.sessionId ?? activeSession?.id ?? null}
+            initialVersionId={matchingTarget.versionId}
+            activeAgentId={activeAgentId}
+            onInspectAsset={(assetId) => {
+              setInspectedAssetId(assetId);
+              setWorkspaceMode("assets");
+            }}
+          />
+        </main>
+      ) : (
+        <>
+          <nav className="compact-nav" aria-label="切换工作区">
+            {([["files", "素材与会话", Files], ["chat", "需求对话", MessageSquare], ["results", "解析结果", Layers3]] as const)
+              .map(([id, label, Icon]) => <button type="button" key={id} aria-pressed={area === id} onClick={() => setArea(id)}>
+                <Icon size={16} />{label}</button>)}
+          </nav>
+          <main className="workbench-grid" data-area={area} data-left={!leftCollapsed} data-right={!rightCollapsed}
+            style={{ gridTemplateColumns: `${leftCollapsed ? "" : "minmax(210px, 232px) "}minmax(300px, 1fr)${rightCollapsed ? "" : ` minmax(350px, min(${resultWidth}%, calc(100% - ${leftCollapsed ? 300 : 532}px)))`}` }}>
+            <aside className="files-area">
+              <LeftSidebar sessions={sessions} activeSessionId={activeSession?.id || null} files={activeSession?.files || []}
+                onCreateSession={() => { if (!isRunning) void handleCreateSession(); }} onSelectSession={handleSelectSession}
+                onDeleteSession={handleDeleteSession} onPreviewFile={setPreviewFile} onDeleteFile={handleDeleteFile}
+                onReparseFile={handleReparse} uploadDisabled={!activeSession || isRunning || stage === "parsing"}
+                onUpload={() => { setArea("chat"); document.getElementById("workbench-upload")?.click(); }} />
+            </aside>
+            <div className="chat-area">
+              <ChatWorkbench ready={!!activeSession} key={activeSession?.id} messages={activeSession?.messages || []} files={activeSession?.files || []}
+                samples={samples} stage={stage} isRunning={isRunning} progress={progress} demoMode={demoMode} onToggleDemoMode={setDemoMode}
+                onUploadFiles={handleUploadFiles} onLoadSampleText={() => {}} onLoadSampleCsv={handleLoadSampleCsv}
+                onPreviewFile={setPreviewFile} onSendMessage={handleSendMessage} onAbortRun={handleAbortRun}
+                onRerunMessage={handleRerunMessage} onResumeMessage={(id) => handleRerunMessage(id, true)} onClearSession={handleClearSession}
+                onSelectDebugMessage={(id) => { setSelectedDebugMessageId(id); openResults("debug"); }}
+                onOpenAgentManager={() => setAgentModalOpen(true)}
+                onOpenResult={(id) => { void handleInspect(id); openResults("overview"); }}
+                revisionBase={revisionBase} onClearRevision={() => setRevisionBase(undefined)}
+                strategy={strategy} onStrategy={setStrategy} />
+            </div>
+            <aside className="results-area">
+              <label className="resize-result" title="调整结果面板宽度">
+                <span>面板宽度</span>
+                <input aria-label="调整结果面板宽度" type="range" min={36} max={53} value={resultWidth}
+                  onChange={(event) => setResultWidth(Number(event.target.value))} />
+              </label>
+              <RightPanel sessionId={activeSession?.id ?? null} templates={templates} activeTemplateId={activeTemplateId} onSelectTemplate={handleSelectTemplate}
+                extractedJson={visibleData} templatePreview={templatePreview} onApplyJsonEdit={handleApplyJsonEdit}
+                onExport={handleExport} debugMessage={debugMessage} progress={progress} isRunning={isRunning} tab={tab} onTab={setTab} versions={versions}
+                onVersion={(id) => void handleInspect(id)} onRevise={(id) => {
+                  setRevisionBase(id); setStrategy("semantic"); setArea("chat");
+                  requestAnimationFrame(() => document.getElementById("workbench-input")?.focus());
+                }} onVerify={(id) => activeSession ? api.verifyVersion(activeSession.id, id) : Promise.reject("没有会话")
+                } onProject={handleProject} onReview={handleReview}
+                onStartMatching={(sid, vid) => {
+                  setMatchingTarget({ sessionId: sid, versionId: vid });
+                  setWorkspaceMode("matching");
+                }}
+                onOpenSource={(id, cite) => {
+                  const file = activeSession?.files.find((item) => item.id === id);
+                  const message = activeSession?.messages.find((item) => item.id === id);
+                  if (file) { setSourceEvidence(cite); setPreviewFile(file); }
+                  else if (message) setMessageSource({ text: message.content, cite });
+                  else antdMessage.info("来源已从当前会话移除");
+                }} />
+            </aside>
+          </main>
+        </>
+      )}
 
       <FilePreviewModal key={previewFile?.id} file={previewFile} cite={sourceEvidence}
         onClose={() => { setPreviewFile(null); setSourceEvidence(undefined); }} />

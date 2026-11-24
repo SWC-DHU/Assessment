@@ -1,0 +1,88 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-ADH-06",
+    "name": "简易半自动点胶机（低精度/无状态与工时定义）",
+    "category": "adhesive",
+    "subcategory": "干扰/低配资产",
+    "description": "简易桌面式点胶机，仅支持点状施胶，位置公差较差且未声明物料状态转换与加工工时模型。",
+    "version": "1.0.0",
+    "tags": [
+      "胶料",
+      "涂胶",
+      "低精度",
+      "参数缺失",
+      "干扰资产"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "ADHESIVE_APPLY",
+      "name": "涂胶",
+      "description": "简易单阀点胶",
+      "qualitative_features": [],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "cell_unit",
+      "adhesive"
+    ],
+    "input_material_types": [],
+    "output_material_types": [],
+    "specifications": [],
+    "input_states": [],
+    "output_states": [],
+    "state_transitions": [],
+    "notes": "低精度且缺失工时与状态转换，用于测试排序与待确认/硬约束校验。"
+  },
+  "parameters": [
+    {
+      "parameter_code": "dispense_accuracy",
+      "name": "胶路精度",
+      "value": 2.5,
+      "lower": null,
+      "upper": null,
+      "unit": "mm",
+      "basis": null,
+      "capability_code": "ADHESIVE_APPLY",
+      "note": null
+    },
+    {
+      "parameter_code": "tolerance",
+      "name": "位置公差",
+      "value": 2.5,
+      "lower": null,
+      "upper": null,
+      "unit": "mm",
+      "basis": null,
+      "capability_code": null,
+      "note": null
+    }
+  ],
+  "interfaces": [],
+  "geometry": null,
+  "behavior": null,
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-ADH-06",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": "低精度且缺失工时与状态转换，用于测试排序与待确认/硬约束校验。"
+  }
+}

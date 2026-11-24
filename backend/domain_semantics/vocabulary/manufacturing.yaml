@@ -6,6 +6,9 @@ concepts:
   CapabilityRequirement: [Capability, 制造能力, 资源能力, 能力需求]
   Constraint: [限制, 工艺约束]
   Objective: [目标, 建模目标]
+  ModelAsset: [模型资产, 设备模型, 资源模型, 数字孪生资产]
+  ResourceCapability: [资源能力, 设备能力, 资产能力]
+  Interface: [接口, 连接接口, 通信接口, 物料接口]
 operations:
   清洗: [清洗工序, 清洗作业, cleaning operation]
   激光清洗: [激光清洗工序, laser cleaning operation]
@@ -82,6 +85,33 @@ parameters:
   temperature:
     aliases: [温度, temperature]
     units: [°C, K]
+  positioning_accuracy:
+    aliases: [定位精度, 重复定位精度, repeatability, positioning accuracy]
+    units: [mm, um, m]
+  payload:
+    aliases: [负载, 额定负载, 承载能力, payload]
+    units: [kg, g, t]
+  laser_power:
+    aliases: [激光功率, 额定功率, laser power]
+    units: [W, kW]
+  force:
+    aliases: [压紧力, 锁紧力, 夹紧力, clamping force]
+    units: [N, kN]
+  voltage:
+    aliases: [测试电压, 绝缘电压, voltage]
+    units: [mV, V, kV]
+  resistance:
+    aliases: [内阻量程, 绝缘电阻, resistance]
+    units: [mOhm, Ohm, MOhm]
+  speed:
+    aliases: [输送速度, 运行速度, 焊接速度, speed]
+    units: [mm/s, m/min, m/s]
+  dispense_accuracy:
+    aliases: [涂胶精度, 施胶精度, 胶量精度, dispense accuracy]
+    units: [mm, um, "%", g]
+  batch_capacity:
+    aliases: [批处理容量, 并行工位数, 单批容量, batch capacity]
+    units: [件, 个, 模组]
 unit_aliases:
   秒: s
   秒钟: s
@@ -93,3 +123,188 @@ unit_aliases:
   μm: um
   Mpa: MPa
   ℃: °C
+  千克: kg
+  克: g
+  吨: t
+  瓦: W
+  千瓦: kW
+  牛: N
+  千牛: kN
+  伏: V
+  千伏: kV
+  毫欧: mOhm
+  欧: Ohm
+  兆欧: MOhm
+asset_categories:
+  feeding:
+    label: 上料设备
+    aliases: [上料, 供料, 上料机, 供料站, feeding]
+  cleaning:
+    label: 清洗设备
+    aliases: [清洗, 激光清洗, 清洁设备, 清洗站, cleaning]
+  adhesive:
+    label: 涂胶与贴胶设备
+    aliases: [涂胶, 贴胶, 施胶, 涂胶机, 贴膜机, adhesive]
+  stacking:
+    label: 堆叠设备
+    aliases: [堆叠, 叠片, 堆叠机, 堆叠站, stacking]
+  assembly:
+    label: 装配设备
+    aliases: [装配, 组装, 总装, 装配站, 捆扎机, assembly]
+  welding:
+    label: 焊接与激光加工设备
+    aliases: [焊接, 激光焊接, 激光加工, 焊接工作站, welding]
+  inspection:
+    label: 检测设备
+    aliases: [检测, 检验, EOL检测, 视觉检测, 读码检测, inspection]
+  transport:
+    label: 输送与移载设备
+    aliases: [输送, 移载, 转运, 输送线, 下线机, transport]
+  robot:
+    label: 工业机器人
+    aliases: [机器人, 机械手, 六轴机器人, SCARA, 搬运机器人, robot]
+  auxiliary:
+    label: 辅助与预处理设备
+    aliases: [辅助设备, 预处理, 打码机, 读码器, 工装夹具, auxiliary]
+material_types:
+  prismatic_cell:
+    label: 方形电芯
+    aliases: [电芯, 方形电芯, 方形锂离子电芯, 锂电池电芯, 来料电芯, cell, prismatic_cell]
+  pouch_cell:
+    label: 软包电芯
+    aliases: [软包电芯, 铝塑膜电芯, pouch_cell]
+  cylindrical_cell:
+    label: 圆柱电芯
+    aliases: [圆柱电芯, 21700电芯, 4680电芯, cylindrical_cell]
+  adhesive_tape:
+    label: 贴胶辅材
+    aliases: [贴胶辅材, 绝缘辅材, 蓝膜, 绝缘胶带, 麦拉膜, adhesive_tape]
+  adhesive:
+    label: 胶料
+    aliases: [胶料, 结构胶, 导热结构胶, 导热胶, AB胶, adhesive]
+  thermal_shell:
+    label: 导热壳
+    aliases: [导热壳, 导热外壳, 电芯导热壳, thermal_shell]
+  cell_unit:
+    label: 单体组件
+    aliases: [单体组件, 电芯单体组件, 电池单体组件, cell_unit]
+  cell_stack:
+    label: 堆叠组件
+    aliases: [堆叠组件, 电芯堆叠组件, 模组堆叠体, cell_stack]
+  mid_plate:
+    label: 中板
+    aliases: [中板, 中板结构件, 模组中板, mid_plate]
+  end_plate:
+    label: 端板
+    aliases: [端板, 端板结构件, 模组端板, end_plate]
+  module_body:
+    label: 模组主体
+    aliases: [模组主体, 电池模组主体, module_body]
+  busbar:
+    label: 跨接片
+    aliases: [跨接片, 汇流排, 连接片, 铝巴, busbar]
+  steel_strap:
+    label: 钢带
+    aliases: [钢带, 捆扎钢带, 不锈钢带, steel_strap]
+  battery_module:
+    label: 电池模组
+    aliases: [模组, 电池模组, 动力电池模组, 方形电池模组, 方形锂离子动力电池模组, battery_module]
+  structural_part:
+    label: 结构连接件
+    aliases: [结构连接件, 相应结构连接件, 结构件, structural_part]
+  metal_housing:
+    label: 金属壳体
+    aliases: [电机壳体, 壳体, 减速器壳体, 铝合金壳体, metal_housing]
+material_state_codes:
+  incoming:
+    label: 来料
+    aliases: [来料, 未处理, 原料, incoming]
+  supplied:
+    label: 已供给
+    aliases: [已供给, 已上料, 已输送, supplied]
+  positioned:
+    label: 已定位
+    aliases: [已定位, 定位后, positioned]
+  cleaned:
+    label: 清洗后
+    aliases: [清洗后, 激光清洗后, 已清洁, cleaned]
+  taped:
+    label: 贴胶后
+    aliases: [贴胶后, 已贴胶, taped]
+  inspected:
+    label: 检测后
+    aliases: [检测后, 已检测, inspected]
+  pretreated:
+    label: 预处理后
+    aliases: [预处理后, 已预处理, pretreated]
+  glued:
+    label: 涂胶后
+    aliases: [涂胶后, 施胶后, 已涂胶, glued]
+  stacked:
+    label: 堆叠后
+    aliases: [堆叠后, 已堆叠, stacked]
+  assembled:
+    label: 装配后
+    aliases: [装配后, 已装配, 总装后, assembled]
+  busbar_mounted:
+    label: 装有跨接片
+    aliases: [装有跨接片, 装有跨接片的, 已装跨接片, busbar_mounted]
+  strapped:
+    label: 捆扎后
+    aliases: [捆扎后, 已捆扎, 固定后, strapped]
+  laser_processed:
+    label: 激光加工后
+    aliases: [激光加工后, 焊接后, 激光焊接后, laser_processed]
+  qualified:
+    label: 合格
+    aliases: [合格, 终检合格, OK, qualified]
+  unqualified:
+    label: 不合格
+    aliases: [不合格, 异常, NG, unqualified]
+  ready_for_transfer:
+    label: 待周转
+    aliases: [待周转, 待下线, 已下线, ready_for_transfer]
+interface_types:
+  material_flow:
+    label: 物料流接口
+    aliases: [物料流, 物流接口, 进出料口, material_flow]
+  mechanical:
+    label: 机械接口
+    aliases: [机械, 法兰, 夹具接口, mechanical]
+  electrical:
+    label: 电气接口
+    aliases: [电气, 电源, 供电接口, electrical]
+  pneumatic:
+    label: 气动接口
+    aliases: [气动, 压缩空气, 真空接口, pneumatic]
+  information:
+    label: 信息流接口
+    aliases: [信息流, 数据接口, MES接口, 追溯接口, information]
+  control:
+    label: 控制接口
+    aliases: [控制, PLC接口, I/O接口, 通信控制, control]
+demand_resource_mappings:
+  - demand_aspect: 所需制造能力 (Operation.required_capability_codes)
+    resource_aspect: 模型提供能力 (ModelAsset.capabilities[].code)
+    ontology_relation: satisfiesCapability
+    mechanism: 受控能力编码精确匹配与多能力集合覆盖
+  - demand_aspect: 输入输出物料 (Operation.input/output_material_ids)
+    resource_aspect: 模型物料适配条件 (ModelAsset.material_compatibility.supported_material_types)
+    ontology_relation: handlesMaterial
+    mechanism: 标准物料类型映射与输入/输出物料集合适配校验
+  - demand_aspect: 工艺约束 (Constraint.parameter_code / related_parameter_codes)
+    resource_aspect: 模型技术参数与定性支持 (ModelAsset.parameters / material_compatibility)
+    ontology_relation: addressesConstraint
+    mechanism: 同参数编码+单位换算三值校验 (PASS/FAIL/UNKNOWN) 与定性约束核验
+  - demand_aspect: 物料状态要求 (Operation.input/output_state_ids)
+    resource_aspect: 模型支持状态转换 (ModelAsset.material_compatibility.state_transitions)
+    ontology_relation: supportsState
+    mechanism: 标准物料状态编码映射与输入→输出状态转换核验
+  - demand_aspect: 设备要求 (Operation.equipment_requirement)
+    resource_aspect: 模型类别及功能描述 (ModelAsset.identity.category / capabilities)
+    ontology_relation: assetCategory
+    mechanism: 受控设备类别匹配与语义/LLM辅助消歧
+  - demand_aspect: 信息流要求 (Operation.information_flows)
+    resource_aspect: 模型信息接口 (ModelAsset.interfaces[type=information])
+    ontology_relation: hasInterface
+    mechanism: 信息接口方向与数据载荷兼容性检查

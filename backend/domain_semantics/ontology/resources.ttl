@@ -1,0 +1,66 @@
+@prefix m: <https://assessment.example.org/ontology/manufacturing#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+m:ModelAsset a owl:Class ;
+    rdfs:label "模型资产"@zh ;
+    rdfs:comment "可复用的数字孪生设备或资源模型资产定义，与具体产线实例和三维模型文件解耦。"@zh .
+
+m:ResourceCapability a owl:Class ;
+    rdfs:label "资源能力"@zh ;
+    rdfs:comment "模型资产所提供的标准制造能力，与需求侧 CapabilityRequirement 共享受控能力编码。"@zh .
+
+m:Interface a owl:Class ;
+    rdfs:label "连接接口"@zh ;
+    rdfs:comment "模型资产对外提供的物料流、机械、电气、气动、控制或信息连接接口。"@zh .
+
+m:providesCapability a owl:ObjectProperty ;
+    rdfs:domain m:ModelAsset ;
+    rdfs:range m:ResourceCapability ;
+    rdfs:comment "模型资产提供的标准制造能力。"@zh .
+
+m:satisfiesCapability a owl:ObjectProperty ;
+    rdfs:domain m:ResourceCapability ;
+    rdfs:range m:CapabilityRequirement ;
+    rdfs:comment "资源侧提供的制造能力与需求侧制造能力需求之间的标准编码对应关系。"@zh .
+
+m:hasInterface a owl:ObjectProperty ;
+    rdfs:domain m:ModelAsset ;
+    rdfs:range m:Interface ;
+    rdfs:comment "模型资产具备的物料、机械、电气、控制或信息接口。"@zh .
+
+m:handlesMaterial a owl:ObjectProperty ;
+    rdfs:domain m:ModelAsset ;
+    rdfs:range m:Material ;
+    rdfs:comment "模型资产可适配处理的标准物料类型。"@zh .
+
+m:supportsState a owl:ObjectProperty ;
+    rdfs:domain m:ModelAsset ;
+    rdfs:range m:MaterialState ;
+    rdfs:comment "模型资产支持的输入或输出物料状态及状态转换。"@zh .
+
+m:addressesConstraint a owl:ObjectProperty ;
+    rdfs:domain m:ModelAsset ;
+    rdfs:range m:Constraint ;
+    rdfs:comment "模型资产的技术参数或定性特性对工艺约束的响应关系。"@zh .
+
+m:assetCategory a owl:DatatypeProperty ;
+    rdfs:domain m:ModelAsset ;
+    rdfs:range xsd:string ;
+    rdfs:comment "模型资产的受控设备类别编码。"@zh .
+
+m:capabilityCode a owl:DatatypeProperty ;
+    rdfs:domain m:ResourceCapability ;
+    rdfs:range xsd:string ;
+    rdfs:comment "资源能力对应的受控制造能力编码。"@zh .
+
+m:interfaceType a owl:DatatypeProperty ;
+    rdfs:domain m:Interface ;
+    rdfs:range xsd:string ;
+    rdfs:comment "接口类型（物料流、机械、电气、气动、控制、信息）。"@zh .
+
+m:interfaceDirection a owl:DatatypeProperty ;
+    rdfs:domain m:Interface ;
+    rdfs:range xsd:string ;
+    rdfs:comment "接口方向（input、output、bidirectional）。"@zh .

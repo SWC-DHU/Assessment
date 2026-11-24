@@ -1,0 +1,243 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-ADH-03",
+    "name": "单体组件高精度平面轨迹涂胶工作站",
+    "category": "adhesive",
+    "subcategory": "平面涂胶机",
+    "description": "三轴龙门视觉引导双螺杆计量平面涂胶机，针对单体组件大面按预设轨迹精准施放导热结构胶，支持胶路视觉在线复检。",
+    "version": "1.0.0",
+    "tags": [
+      "单体组件",
+      "胶料",
+      "平面涂胶",
+      "轨迹施胶",
+      "高精度"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "ADHESIVE_APPLY",
+      "name": "涂胶",
+      "description": "对单体组件规定表面按轨迹进行高精度定量施胶",
+      "qualitative_features": [
+        "adhesive_placement",
+        "assembly_alignment"
+      ],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "cell_unit",
+      "adhesive"
+    ],
+    "input_material_types": [
+      "cell_unit",
+      "adhesive"
+    ],
+    "output_material_types": [
+      "cell_unit"
+    ],
+    "specifications": [],
+    "input_states": [
+      "assembled"
+    ],
+    "output_states": [
+      "glued"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "cell_unit",
+        "from_state": "assembled",
+        "to_state": "glued",
+        "condition": null
+      }
+    ],
+    "notes": null
+  },
+  "parameters": [
+    {
+      "parameter_code": "process_time",
+      "name": "单组件涂胶工时",
+      "value": 9.0,
+      "lower": 7.5,
+      "upper": 12.0,
+      "unit": "s",
+      "basis": "单体组件",
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "dispense_accuracy",
+      "name": "胶路轨迹精度",
+      "value": 0.15,
+      "lower": null,
+      "upper": null,
+      "unit": "mm",
+      "basis": null,
+      "capability_code": "ADHESIVE_APPLY",
+      "note": null
+    },
+    {
+      "parameter_code": "temperature",
+      "name": "胶温控制范围",
+      "value": null,
+      "lower": 20.0,
+      "upper": 35.0,
+      "unit": "°C",
+      "basis": null,
+      "capability_code": "ADHESIVE_APPLY",
+      "note": null
+    },
+    {
+      "parameter_code": "pressure",
+      "name": "供胶压力",
+      "value": 0.35,
+      "lower": 0.2,
+      "upper": 0.6,
+      "unit": "MPa",
+      "basis": null,
+      "capability_code": "ADHESIVE_APPLY",
+      "note": null
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "mat_in",
+      "name": "进料物料接口",
+      "interface_type": "material_flow",
+      "direction": "input",
+      "compatible_conditions": [
+        "单体组件+双组份胶料"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mat_out",
+      "name": "出料物料接口",
+      "interface_type": "material_flow",
+      "direction": "output",
+      "compatible_conditions": [
+        "涂胶后单体组件"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "ctrl_main",
+      "name": "产线控制接口",
+      "interface_type": "control",
+      "direction": "bidirectional",
+      "compatible_conditions": [
+        "PLC同步信号",
+        "安全联锁"
+      ],
+      "protocol": "OPC-UA",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "pwr_ac",
+      "name": "工业供电接口",
+      "interface_type": "electrical",
+      "direction": "input",
+      "compatible_conditions": [
+        "380V AC 3P"
+      ],
+      "protocol": "IEC-60309",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "info_mes",
+      "name": "MES信息流上报接口",
+      "interface_type": "information",
+      "direction": "output",
+      "compatible_conditions": [
+        "涂胶轨迹检测记录"
+      ],
+      "protocol": "MES-REST/OPC-UA",
+      "payload_schema": "JSON traceability record",
+      "optional": false
+    }
+  ],
+  "geometry": {
+    "dimensions_mm": {
+      "length": 2200.0,
+      "width": 1600.0,
+      "height": 2100.0
+    },
+    "coordinate_system": "RHS_Z_UP_MM",
+    "mounting_datum": "bottom_center_floor",
+    "connection_points": [
+      {
+        "point_id": "pt_in",
+        "interface_id": "mat_in",
+        "position_mm": [
+          0.0,
+          800.0,
+          900.0
+        ],
+        "normal": [
+          -1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "point_id": "pt_out",
+        "interface_id": "mat_out",
+        "position_mm": [
+          2200.0,
+          800.0,
+          900.0
+        ],
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "completeness": "complete"
+  },
+  "behavior": {
+    "cycle_time_s": 9.0,
+    "cycle_time_basis": "单体组件",
+    "batch_size": 1,
+    "operating_states": [
+      "IDLE",
+      "RUNNING",
+      "FAULT",
+      "MAINTENANCE"
+    ],
+    "behavior_model_ref": null,
+    "behavior_model_type": "discrete_event",
+    "availability": 0.98
+  },
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-ADH-03",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": null
+  }
+}

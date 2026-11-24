@@ -12,6 +12,8 @@ import type {
   RunChatResponse,
   OntologyCatalog, PipelineStage, ProcessGraph, ReviewRequest,
   ContractKind, ContractSchema, ResourceMatchingInput,
+  AssetCatalogListResponse, AssetCatalogSummary, AssetCatalogItem, AssetValidationResult,
+  ModelAsset, ResourceMatchingConfig, ResourceMatchingOutput, MatchingRunSummary,
   SampleDataset,
   SemanticVersion,
   SemanticModel,
@@ -46,6 +48,8 @@ const schemaPaths: Record<ContractKind, string> = {
   candidates: "/api/semantics/candidates/schema",
   formal: "/api/semantics/schema",
   handoff: "/api/semantics/handoff/schema",
+  model_asset: "/api/model-assets/schema",
+  matching_output: "/api/resource-matching/schema",
 };
 
 function versionUrl(sessionId: string, version: string) {
@@ -279,4 +283,82 @@ export const api = {
       `/api/sessions/${sessionId}/resume/${messageId}?run_token=${runToken}`,
       { method: "POST", signal },
     ),
+
+  // Model Asset Library
+  getAssetSummary: () => request<AssetCatalogSummary>("/api/model-assets/summary"),
+  listAssets: (params?: {
+    category?: string;
+    capability?: string;
+    material_type?: string;
+    binding_status?: string;
+    search?: string;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.category) query.set("category", params.category);
+    if (params?.capability) query.set("capability", params.capability);
+    if (params?.material_type) query.set("material_type", params.material_type);
+    if (params?.binding_status) query.set("binding_status", params.binding_status);
+    if (params?.search) query.set("search", params.search);
+    const qs = query.toString();
+    return request<AssetCatalogListResponse>(`/api/model-assets${qs ? `?${qs}` : ""}`);
+  },
+  getAsset: (assetId: string) =>
+    request<AssetCatalogItem>(`/api/model-assets/${encodeURIComponent(assetId)}`),
+  validateAssetPayload: (payload: unknown) =>
+    request<{ valid: boolean; count: number; results: AssetValidationResult[] }>("/api/model-assets/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payload }),
+    }),
+  importAssets: (assets: unknown[], overwrite = false) =>
+    request<{
+      imported_count: number;
+      imported_ids: string[];
+      skipped: { index: number; asset_id: string; reason: string }[];
+      failed: { index: number; asset_id: string | null; issues: unknown[] }[];
+      catalog_version: string;
+    }>("/api/model-assets/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assets, overwrite }),
+    }),
+  updateAssetBinding: (assetId: string, binding: ModelAsset["model_binding"]) =>
+    request<AssetCatalogItem & { catalog_version: string }>(
+      `/api/model-assets/${encodeURIComponent(assetId)}/binding`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(binding),
+      }
+    ),
+  exportAssetsUrl: (assetIds?: string[]) =>
+    `/api/model-assets/export${assetIds?.length ? `?asset_ids=${encodeURIComponent(assetIds.join(","))}` : ""}`,
+
+  // Resource Matching Agent
+  runResourceMatching: (
+    sessionId: string,
+    versionId: string,
+    payload: { config: Partial<ResourceMatchingConfig>; agent_id?: string | null; save?: boolean }
+  ) =>
+    request<ResourceMatchingOutput>(
+      `/api/resource-matching/sessions/${encodeURIComponent(sessionId)}/versions/${encodeURIComponent(versionId)}/run`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    ),
+  listMatchingRuns: (params?: { session_id?: string; semantic_version_id?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.session_id) query.set("session_id", params.session_id);
+    if (params?.semantic_version_id) query.set("semantic_version_id", params.semantic_version_id);
+    const qs = query.toString();
+    return request<MatchingRunSummary[]>(`/api/resource-matching/runs${qs ? `?${qs}` : ""}`);
+  },
+  getMatchingRun: (runId: string) =>
+    request<ResourceMatchingOutput>(`/api/resource-matching/runs/${encodeURIComponent(runId)}`),
+  deleteMatchingRun: (runId: string) =>
+    request<void>(`/api/resource-matching/runs/${encodeURIComponent(runId)}`, { method: "DELETE" }),
+  exportMatchingRunUrl: (runId: string) =>
+    `/api/resource-matching/runs/${encodeURIComponent(runId)}/export`,
 };

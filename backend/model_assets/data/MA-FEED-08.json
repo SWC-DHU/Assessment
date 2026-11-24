@@ -1,0 +1,198 @@
+{
+  "schema_version": "1.0.0",
+  "data_source": "synthetic",
+  "instantiation_policy": {
+    "reusable": true,
+    "max_parallel_instances": null,
+    "instance_id_pattern": "{asset_id}#inst-{seq}",
+    "notes": "模型资产定义，可在产线规划阶段被多次实例化。"
+  },
+  "identity": {
+    "asset_id": "MA-FEED-08",
+    "name": "模组结构件柔性供料输送平台",
+    "category": "feeding",
+    "subcategory": "通用结构件供料",
+    "description": "可切换夹具的柔性板类结构件供料与输送平台，同时兼容中板、端板及其他模组结构连接件，可在多条旁路复用实例化。",
+    "version": "1.0.0",
+    "tags": [
+      "中板",
+      "端板",
+      "结构件",
+      "供料",
+      "输送",
+      "柔性复用"
+    ]
+  },
+  "capabilities": [
+    {
+      "code": "FEED",
+      "name": "供料",
+      "description": "可换型结构件料仓供料",
+      "qualitative_features": [
+        "material_compatibility",
+        "material_handling"
+      ],
+      "is_primary": true
+    },
+    {
+      "code": "TRANSPORT",
+      "name": "输送",
+      "description": "模块化皮带输送至装配工位",
+      "qualitative_features": [
+        "material_handling"
+      ],
+      "is_primary": true
+    }
+  ],
+  "material_compatibility": {
+    "supported_material_types": [
+      "mid_plate",
+      "end_plate",
+      "structural_part"
+    ],
+    "input_material_types": [],
+    "output_material_types": [],
+    "specifications": [],
+    "input_states": [
+      "incoming"
+    ],
+    "output_states": [
+      "supplied"
+    ],
+    "state_transitions": [
+      {
+        "material_type": "mid_plate",
+        "from_state": "incoming",
+        "to_state": "supplied",
+        "condition": null
+      },
+      {
+        "material_type": "end_plate",
+        "from_state": "incoming",
+        "to_state": "supplied",
+        "condition": null
+      },
+      {
+        "material_type": "structural_part",
+        "from_state": "incoming",
+        "to_state": "supplied",
+        "condition": null
+      }
+    ],
+    "notes": null
+  },
+  "parameters": [
+    {
+      "parameter_code": "process_time",
+      "name": "结构件供料输送工时",
+      "value": 14.0,
+      "lower": 12.0,
+      "upper": 18.0,
+      "unit": "s",
+      "basis": "模组",
+      "capability_code": null,
+      "note": null
+    },
+    {
+      "parameter_code": "speed",
+      "name": "输送速度",
+      "value": 360.0,
+      "lower": null,
+      "upper": null,
+      "unit": "mm/s",
+      "basis": null,
+      "capability_code": "TRANSPORT",
+      "note": null
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "mat_in",
+      "name": "进料物料接口",
+      "interface_type": "material_flow",
+      "direction": "input",
+      "compatible_conditions": [
+        "结构件通用料框"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "mat_out",
+      "name": "出料物料接口",
+      "interface_type": "material_flow",
+      "direction": "output",
+      "compatible_conditions": [
+        "已供给结构件对接位"
+      ],
+      "protocol": "Pallet-Conveyor",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "ctrl_main",
+      "name": "产线控制接口",
+      "interface_type": "control",
+      "direction": "bidirectional",
+      "compatible_conditions": [
+        "PLC同步信号",
+        "安全联锁"
+      ],
+      "protocol": "OPC-UA",
+      "payload_schema": null,
+      "optional": false
+    },
+    {
+      "interface_id": "pwr_ac",
+      "name": "工业供电接口",
+      "interface_type": "electrical",
+      "direction": "input",
+      "compatible_conditions": [
+        "380V AC 3P"
+      ],
+      "protocol": "IEC-60309",
+      "payload_schema": null,
+      "optional": false
+    }
+  ],
+  "geometry": {
+    "dimensions_mm": {
+      "length": 2300.0,
+      "width": 1200.0,
+      "height": 1600.0
+    },
+    "coordinate_system": "RHS_Z_UP_MM",
+    "mounting_datum": "bottom_center_floor",
+    "connection_points": [],
+    "completeness": "partial"
+  },
+  "behavior": {
+    "cycle_time_s": 14.0,
+    "cycle_time_basis": "模组",
+    "batch_size": 1,
+    "operating_states": [
+      "IDLE",
+      "RUNNING",
+      "FAULT",
+      "MAINTENANCE"
+    ],
+    "behavior_model_ref": null,
+    "behavior_model_type": "discrete_event",
+    "availability": 0.96
+  },
+  "model_binding": {
+    "model_uri": null,
+    "file_format": null,
+    "binding_status": "unbound",
+    "asset_ref_key": "MA-FEED-08",
+    "checksum_sha256": null,
+    "notes": "预留三维模型绑定入口，语义描述与三维文件解耦。"
+  },
+  "provenance": {
+    "author": "synthetic_catalog_builder",
+    "created_at": "2026-11-24T00:00:00Z",
+    "synthetic_disclaimer": "Synthetic experimental model asset generated for Assessment resource-matching research; not real OEM equipment data.",
+    "notes": null
+  }
+}
